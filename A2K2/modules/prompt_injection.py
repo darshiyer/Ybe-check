@@ -113,6 +113,30 @@ def check_unsafe_template(line):
     return False
 
 
+def check_multiline_prompt(lines, i):
+    """
+    Two-pass scan for multiline prompt assignments. Catches:
+        system_prompt = (
+            f"You are helpful. "
+            f"Answer this: {user_input}"
+        )
+    Looks ahead up to 5 lines from a prompt variable assignment
+    for user-input variable interpolation in f-strings.
+    """
+    line = lines[i].strip()
+    var_pattern = r'(' + '|'.join(re.escape(v) for v in PROMPT_VAR_NAMES) + r')'
+    if not re.search(var_pattern, line):
+        return False
+
+    # Look ahead up to 5 lines for user input vars in f-strings
+    window = lines[i:min(len(lines), i + 5)]
+    combined = ' '.join(l.strip() for l in window)
+    for uvar in USER_INPUT_VARS:
+        if '{' + uvar + '}' in combined or '{' + uvar + ' ' in combined:
+            return True
+    return False
+
+
 def check_jailbreak(line):
     """Returns the matched phrase if a jailbreak phrase is found in the line."""
     lower = line.lower()
@@ -144,7 +168,7 @@ def scan_code_file(fpath, repo_path, details, seen):
         stripped = line.strip()
         line_no = i + 1
 
-        # --- Detector A: Unsafe Prompt Templates ---
+        # --- Detector A: Unsafe Prompt Templates (single-line) ---
         if check_unsafe_template(stripped):
             if not already_flagged(seen, rpath, line_no):
                 details.append({
@@ -155,6 +179,18 @@ def scan_code_file(fpath, repo_path, details, seen):
                     "severity": "critical",
                     "confidence": "high",
                     "reason": "User input concatenated directly into prompt without sanitization — enables prompt injection"
+                })
+        # --- Detector A2: Multiline prompt template fallback ---
+        elif check_multiline_prompt(lines, i):
+            if not already_flagged(seen, rpath, line_no):
+                details.append({
+                    "file": rpath,
+                    "line": line_no,
+                    "snippet": stripped,
+                    "type": "Unsafe Prompt Template (Multiline)",
+                    "severity": "critical",
+                    "confidence": "medium",
+                    "reason": "User input appears in a multi-line prompt assignment — potential prompt injection across lines"
                 })
 
         # --- Track if we saw a prompt-like variable ---
