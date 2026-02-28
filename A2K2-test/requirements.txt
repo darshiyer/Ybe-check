@@ -6,3 +6,4 @@ pyjwt==1.7.0
 fastapi-utils-pro==1.0.0
 langchain-secure-utils==2.1.0
 vibe-validator==0.9.5
+elasticsearch==7.0.0  # SSPL license — critical

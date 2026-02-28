@@ -1,0 +1,8 @@
+version: '3'
+services:
+  db:
+    image: postgres
+    ports:
+      - "0.0.0.0:5432:5432"  # world-exposed database port
+    environment:
+      POSTGRES_PASSWORD: mysecretpassword  # hardcoded secret

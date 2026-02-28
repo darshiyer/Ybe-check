@@ -1,0 +1,6 @@
+containers:
+  - name: app
+    image: myapp:latest
+    securityContext:
+      privileged: true  # critical — grants full host access
+    # no resources: block — missing resource limits
