@@ -283,9 +283,16 @@ def determine_status(score, issues: int, warning: str = "") -> str:
     return "completed"
 
 
-def load_modules(static_only: bool = False):
+def load_modules(static_only: bool = False, dynamic_only: bool = False):
     """Dynamically import scan modules; skip silently if file doesn't exist."""
-    module_list = STATIC_MODULES if static_only else ALL_MODULES
+    if static_only:
+        module_list = STATIC_MODULES
+    elif dynamic_only:
+        # Dynamic = All modules not in Static (avoid duplicates)
+        module_list = [m for m in ALL_MODULES if m not in STATIC_MODULES]
+    else:
+        module_list = ALL_MODULES
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
     loaded = []
     for import_name in module_list:
@@ -419,8 +426,8 @@ def build_top_fixes(modules_out: list) -> list:
     return top_fixes
 
 
-def run_scan(repo_path: str, static_only: bool = False) -> dict:
-    modules = load_modules(static_only=static_only)
+def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = False) -> dict:
+    modules = load_modules(static_only=static_only, dynamic_only=dynamic_only)
     modules_out = []
 
     for mod in modules:
@@ -593,6 +600,10 @@ def main():
         "--static", action="store_true",
         help="Run static analysis only (skip network-dependent checks)"
     )
+    parser.add_argument(
+        "--dynamic", action="store_true",
+        help="Run dynamic analysis only (skip source code checks)"
+    )
     args = parser.parse_args()
 
     repo_path = os.path.abspath(args.repo_path)
@@ -612,7 +623,7 @@ def main():
         sys.exit(1)
 
     try:
-        report = run_scan(repo_path, static_only=args.static)
+        report = run_scan(repo_path, static_only=args.static, dynamic_only=args.dynamic)
         if args.json:
             print(json.dumps(report, indent=2))
         else:

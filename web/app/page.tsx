@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import LetterGlitch from "./components/LetterGlitch";
+import GlitchText from "./components/GlitchText";
+import { jsPDF } from "jspdf";
 
 /* ─── DESIGN TOKENS ──────────────────────────────────────── */
 
@@ -82,6 +84,110 @@ function scoreColor(s: number) {
   return T.red;
 }
 
+function generatePDF(report: Report, mode: "static" | "dynamic", url: string) {
+  const doc = new jsPDF();
+  const isStatic = mode === "static";
+  const targetName = url.replace(/https?:\/\/(github\.com\/)?/, "");
+
+  // Header
+  doc.setFillColor(15, 20, 25);
+  doc.rect(0, 0, 210, 40, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(24);
+  doc.setFont("helvetica", "bold");
+  doc.text("Security Audit Report", 20, 25);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Generated on ${new Date().toLocaleString()}`, 20, 32);
+
+  // Target Info
+  doc.setTextColor(33, 33, 33);
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text(isStatic ? "GitHub Repository:" : "Website URL:", 20, 50);
+  doc.setFont("helvetica", "normal");
+  doc.text(targetName, 70, 50);
+
+  // Executive Summary
+  doc.setDrawColor(230, 230, 230);
+  doc.line(20, 60, 190, 60);
+
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("Executive Summary", 20, 75);
+
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Overall Security Score:`, 20, 85);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(report.overall_score >= 80 ? 63 : report.overall_score >= 50 ? 210 : 248, report.overall_score >= 80 ? 185 : report.overall_score >= 50 ? 153 : 81, report.overall_score >= 80 ? 80 : report.overall_score >= 50 ? 34 : 73);
+  doc.text(`${report.overall_score}/100`, 70, 85);
+
+  doc.setTextColor(33, 33, 33);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Verdict:`, 20, 92);
+  doc.setFont("helvetica", "bold");
+  doc.text(report.verdict, 70, 92);
+
+  // Issue Breakdown
+  doc.setFontSize(14);
+  doc.text("Vulnerability Breakdown", 20, 110);
+
+  const issues = [
+    { label: "Critical", count: report.summary.critical, color: [248, 81, 73] },
+    { label: "High", count: report.summary.high, color: [248, 81, 73] },
+    { label: "Medium", count: report.summary.medium, color: [219, 109, 40] },
+    { label: "Low", count: report.summary.low, color: [88, 166, 255] }
+  ];
+
+  let y = 120;
+  issues.forEach(issue => {
+    doc.setFillColor(245, 245, 245);
+    doc.rect(20, y - 5, 170, 10, "F");
+    doc.setTextColor(33, 33, 33);
+    doc.setFont("helvetica", "bold");
+    doc.text(issue.label, 25, y + 2);
+    doc.setTextColor(issue.color[0], issue.color[1], issue.color[2]);
+    doc.text(issue.count.toString(), 180, y + 2, { align: "right" });
+    y += 12;
+  });
+
+  // Module Summary
+  if (y > 250) { doc.addPage(); y = 20; }
+  doc.setTextColor(33, 33, 33);
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.text("Module Analysis", 20, y + 15);
+  y += 25;
+
+  report.modules.forEach(mod => {
+    if (y > 270) { doc.addPage(); y = 20; }
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text(mod.name, 20, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(`Status: ${mod.status.toUpperCase()}`, 110, y);
+    doc.text(`Issues: ${mod.issues}`, 160, y);
+
+    doc.setDrawColor(240, 240, 240);
+    doc.line(20, y + 3, 190, y + 3);
+    y += 12;
+  });
+
+  // Footer
+  const pageCount = doc.internal.pages.length - 1;
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Ybe Check Security Audit - Page ${i} of ${pageCount}`, 105, 285, { align: "center" });
+  }
+
+  doc.save(`YbeCheck_Report_${targetName.replace(/[^a-z0-9]/gi, "_")}.pdf`);
+}
+
 function sevColor(s?: string) {
   const v = (s || "").toLowerCase();
   if (v === "high" || v === "critical") return T.red;
@@ -129,16 +235,36 @@ function ModuleIcon({ name, size = 20, color = "#8B949E" }: { name: string; size
       return <svg viewBox="0 0 24 24" {...s}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><path d="M9 15l2 2 4-4" /></svg>;
     case "Test & Coverage":
       return <svg viewBox="0 0 24 24" {...s}><path d="M10 2v7.31" /><path d="M14 9.3V1.99" /><path d="M8.5 2h7" /><path d="M14 9.3a6.5 6.5 0 11-4 0" /></svg>;
+    case "API Fuzzing":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M12 2v10" /><path d="M18.4 4.6l-7.1 7.1" /><path d="M4.6 18.4l7.1-7.1" /><circle cx="12" cy="12" r="2" fill={color} stroke="none" /></svg>;
+    case "Container Security":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M22 12l-4-4V5a2 2 0 00-2-2H8a2 2 0 00-2 2v3l-4 4 4 4v3a2 2 0 002 2h8a2 2 0 002-2v-3l4-4z" /></svg>;
+    case "Load Testing":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M3 6h18" /><path d="M3 12h18" /><path d="M3 18h18" /><path d="M7 6l1 6-1 6" /><path d="M17 6l-1 6 1 6" /></svg>;
+    case "Live Prompt Testing":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /><path d="M8 9h8" /><path d="M8 13h6" /></svg>;
+    case "SBOM":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" /></svg>;
+    case "Web Attacks":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M18 11V6a2 2 0 00-2-2v0a2 2 0 00-2 2v0" /><path d="M14 10V4a2 2 0 00-2-2v0a2 2 0 00-2 2v2" /><path d="M10 10.5V6a2 2 0 00-2-2v0a2 2 0 00-2 2v8" /><path d="M18 8a2 2 0 114 0v6a8 8 0 01-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 012.83-2.82L7 15" /></svg>;
+    case "Config & Env":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M12 20a8 8 0 100-16 8 8 0 000 16z" /><path d="M12 14a2 2 0 100-4 2 2 0 000 4z" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="M20 12h2" /><path d="M2 12h2" /></svg>;
     default:
       return <svg viewBox="0 0 24 24" {...s}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>;
   }
 }
 
-const PHASES = [
+const STATIC_PHASES = [
   "Cloning repository", "Secrets detection", "Prompt injection scan",
   "PII & logging check", "Dependency audit", "Auth guard analysis",
   "IaC security audit", "License compliance", "AI traceability",
   "Test & coverage analysis",
+];
+
+const DYNAMIC_PHASES = [
+  "Resolving target", "Web attack surface scan", "API fuzzing",
+  "Load testing analysis", "Live prompt testing", "Container audit",
+  "SBOM generation", "Config & environment check",
 ];
 
 /* ═══════════════════════════════════════════════════════════════
@@ -147,18 +273,22 @@ const PHASES = [
 
 const M = {
   bg: "#0a0a0b",
-  card: "#141417",
-  cardLt: "#1a1a1f",
-  border: "#222228",
-  dim: "#555",
-  dimLt: "#888",
+  card: "rgba(35, 35, 40, 0.35)", // Precise Apple Control Center Material
+  cardLt: "rgba(255, 255, 255, 0.04)",
+  border: "rgba(255, 255, 255, 0.1)",
+  dim: "#888",
+  dimLt: "#aaa",
   radius: 20,
 };
 
 const mCard = (extra?: React.CSSProperties): React.CSSProperties => ({
   background: M.card,
+  backdropFilter: "blur(45px) saturate(180%)",
+  WebkitBackdropFilter: "blur(45px) saturate(180%)",
   borderRadius: M.radius,
   padding: "28px",
+  border: `1px solid ${M.border}`,
+  boxShadow: "0 10px 40px -10px rgba(0,0,0,0.5)",
   ...extra,
 });
 
@@ -174,94 +304,129 @@ export default function Home() {
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [phase, setPhase] = useState(0);
   const [transitioning, setTransitioning] = useState(false);
+  const [scanMode, setScanMode] = useState<"static" | "dynamic">("static");
+
+  const phases = scanMode === "static" ? STATIC_PHASES : DYNAMIC_PHASES;
 
   useEffect(() => {
     if (!loading) { setPhase(0); return; }
-    const iv = setInterval(() => setPhase(p => Math.min(p + 1, PHASES.length - 1)), 2800);
+    const iv = setInterval(() => setPhase(p => Math.min(p + 1, phases.length - 1)), 2800);
     return () => clearInterval(iv);
-  }, [loading]);
+  }, [loading, phases.length]);
 
-  const scan = useCallback(async () => {
-    const u = url.trim();
-    if (!u) { setError("Enter a GitHub repo URL"); return; }
-    setError(null); setReport(null); setActiveModule(null); setLoading(true);
+  const onScan = useCallback(async (mode: "static" | "dynamic", target: string) => {
+    const u = target.trim();
+    if (!u) { setError(mode === "static" ? "Enter a GitHub repo URL" : "Enter a Website URL"); return; }
+    setError(null); setReport(null); setActiveModule(null); setLoading(true); setScanMode(mode);
     try {
-      const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) });
+      const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, mode }) });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "Scan failed"); return; }
       setTransitioning(true);
       setTimeout(() => { setReport(d); setTransitioning(false); }, 1000);
     } catch (e) { setError(e instanceof Error ? e.message : "Network error"); }
     finally { setLoading(false); }
-  }, [url]);
+  }, []);
 
   const reset = () => { setReport(null); setActiveModule(null); };
 
-  /* Matrix → dashboard dissolve */
-  if (transitioning) {
-    return (
-      <div style={{ position: "relative", minHeight: "100vh", overflow: "hidden", background: M.bg }}>
-        <div style={{ position: "absolute", inset: 0, zIndex: 0, animation: "fadeIn 0.3s ease-out" }}>
+  const showBackground = !report && !activeModule;
+
+  return (
+    <div style={{ position: "relative", minHeight: "100vh", background: M.bg, overflow: "hidden" }}>
+      {/* GLOBAL MATRIX BACKGROUND */}
+      {showBackground && (
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 0,
+          transition: "opacity 1s ease-in-out"
+        }} className={(loading || transitioning) ? "fade-up-slow" : ""}>
           <LetterGlitch glitchColors={["#2b4539", "#61dca3", "#61b3dc"]} glitchSpeed={50} centerVignette outerVignette={false} smooth />
         </div>
-        <div style={{ position: "absolute", inset: 0, zIndex: 10, background: M.bg, animation: "fadeIn 1s ease-in-out forwards" }} />
-        <div style={{ position: "absolute", inset: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ textAlign: "center", animation: "fadeIn 0.5s ease-out 0.3s both" }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: T.text }}>Building your report...</div>
+      )}
+
+      {/* VIEW LAYOUT */}
+      <div style={{ position: "relative", zIndex: 10 }}>
+        {transitioning ? (
+          <div style={{ position: "absolute", inset: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+            <div style={{ textAlign: "center", animation: "fadeIn 0.5s ease-out both" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: T.text }}>Building your report...</div>
+            </div>
           </div>
-        </div>
+        ) : loading ? (
+          <ScanningView url={url} phase={phase} mode={scanMode} phases={phases} />
+        ) : report && activeModule ? (
+          (() => {
+            const mod = report.modules.find(m => m.name === activeModule);
+            return mod ? <ModuleDetailView mod={mod} onBack={() => setActiveModule(null)} onHome={reset} /> : null;
+          })()
+        ) : report ? (
+          <DashboardView report={report} onModuleClick={setActiveModule} onHome={reset} mode={scanMode} url={url} />
+        ) : (
+          <LandingView onScan={onScan} error={error} hideBg />
+        )}
       </div>
-    );
-  }
-
-  if (loading) return <ScanningView url={url} phase={phase} />;
-
-  if (report && activeModule) {
-    const mod = report.modules.find(m => m.name === activeModule);
-    if (mod) return <ModuleDetailView mod={mod} onBack={() => setActiveModule(null)} onHome={reset} />;
-  }
-
-  if (report) return <DashboardView report={report} onModuleClick={setActiveModule} onHome={reset} />;
-
-  return <LandingView url={url} setUrl={setUrl} scan={scan} error={error} />;
+    </div>
+  );
 }
 
 /* ═══════════════════════════════════════════════════════════════
    LANDING
    ═══════════════════════════════════════════════════════════════ */
 
-function LandingView({ url, setUrl, scan, error }: { url: string; setUrl: (v: string) => void; scan: () => void; error: string | null }) {
+function LandingView({ onScan, error, hideBg }: { onScan: (mode: "static" | "dynamic", target: string) => void; error: string | null; hideBg?: boolean }) {
+  const [staticUrl, setStaticUrl] = useState("");
+  const [dynamicUrl, setDynamicUrl] = useState("");
+
   return (
-    <div style={{ position: "relative", minHeight: "100vh", overflow: "hidden" }}>
-      <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
-        <LetterGlitch glitchColors={["#2b4539", "#61dca3", "#61b3dc"]} glitchSpeed={50} centerVignette outerVignette={false} smooth />
-      </div>
+    <div style={{ position: "relative", minHeight: "100vh" }}>
+      {!hideBg && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
+          <LetterGlitch glitchColors={["#2b4539", "#61dca3", "#61b3dc"]} glitchSpeed={50} centerVignette outerVignette={false} smooth />
+        </div>
+      )}
       <nav style={{ position: "relative", zIndex: 10, display: "flex", justifyContent: "center", padding: "16px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 32, padding: "10px 28px", borderRadius: 50, background: "rgba(15,20,25,0.75)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.08)" }}>
           <span style={{ fontWeight: 700, fontSize: 16, color: "#fff" }}>Ybe Check</span>
-          <a href="https://github.com/darshiyer/A2K2-PS1" target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: T.text2, textDecoration: "none" }}>Docs</a>
+          <a href="#" style={{ fontSize: 14, color: T.text2, textDecoration: "none" }}>Dynamic Mode v1.2</a>
         </div>
       </nav>
-      <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "calc(100vh - 72px)", padding: "0 24px", textAlign: "center" }}>
-        <h1 style={{ fontSize: "clamp(36px, 6vw, 64px)", fontWeight: 800, lineHeight: 1.15, maxWidth: 700, letterSpacing: "-0.02em", marginBottom: 20, background: "linear-gradient(90deg, #9BA7B4 0%, #E6EDF3 20%, #FFFFFF 40%, #feb3ff 50%, #FFFFFF 60%, #E6EDF3 80%, #9BA7B4 100%)", backgroundSize: "300% 100%", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", animation: "metallicShine 4s ease-in-out infinite", filter: "drop-shadow(0 2px 40px rgba(0,0,0,0.5))" }}>
-          Production-readiness audit for vibe-coded apps
+      <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "calc(100vh - 72px)", padding: "40px 24px", textAlign: "center" }}>
+        <h1 style={{ fontSize: "clamp(36px, 5vw, 64px)", fontWeight: 800, lineHeight: 1.1, maxWidth: 850, letterSpacing: "-0.03em", marginBottom: 16 }}>
+          <GlitchText speed={1} enableShadows className="hero-glitch">
+            Production-readiness audit for vibe-coded apps
+          </GlitchText>
         </h1>
-        <p style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", maxWidth: 460, lineHeight: 1.6, marginBottom: 36 }}>
-          Scan any GitHub repo for security vulnerabilities. Get a 0–100 production readiness score.
+        <p style={{ fontSize: 16, color: "rgba(255,255,255,0.85)", maxWidth: 500, lineHeight: 1.6, marginBottom: 48 }}>
+          Secure your stack. Scan repositories statically or analyze website URLs dynamically for vulnerabilities.
         </p>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", maxWidth: 540, width: "100%" }}>
-          <input type="text" placeholder="https://github.com/user/repo" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && scan()}
-            style={{ flex: 1, minWidth: 240, padding: "14px 20px", borderRadius: 50, background: "rgba(15,20,25,0.7)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", fontSize: 15, outline: "none", fontFamily: "inherit", backdropFilter: "blur(10px)" }}
-            onFocus={e => { e.currentTarget.style.borderColor = "rgba(88,166,255,0.5)"; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(88,166,255,0.15)"; }}
-            onBlur={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; e.currentTarget.style.boxShadow = "none"; }}
-          />
-          <button onClick={scan} style={{ padding: "14px 32px", borderRadius: 50, border: "none", cursor: "pointer", background: "#fff", color: "#000", fontSize: 15, fontWeight: 600, fontFamily: "inherit", transition: "transform 0.15s" }}
-            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.03)"; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
-          >Get Started</button>
-          <button onClick={() => window.open("https://github.com/darshiyer/A2K2-PS1", "_blank")} style={{ padding: "14px 32px", borderRadius: 50, cursor: "pointer", background: "rgba(15,20,25,0.6)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)", fontSize: 15, fontWeight: 500, fontFamily: "inherit", backdropFilter: "blur(10px)" }}>Learn More</button>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", maxWidth: 650 }}>
+          {/* STATIC PILL */}
+          <div style={mCard({ display: "flex", alignItems: "center", padding: "8px 8px 8px 16px", borderRadius: 100, gap: 12, border: "1px solid rgba(255,255,255,0.12)" })}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, paddingRight: 12, borderRight: "1px solid rgba(255,255,255,0.1)", flexShrink: 0 }}>
+              <ModuleIcon name="Auth Guards" size={18} color="#fff" />
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>Static</span>
+            </div>
+            <input type="text" placeholder="user/repo or GitHub URL" value={staticUrl} onChange={e => setStaticUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && onScan("static", staticUrl)}
+              style={{ flex: 1, background: "none", border: "none", color: "#fff", fontSize: 15, outline: "none", padding: "4px 8px" }} />
+            <button onClick={() => onScan("static", staticUrl)} style={{ padding: "10px 24px", borderRadius: 100, border: "none", cursor: "pointer", background: "#fff", color: "#000", fontSize: 13, fontWeight: 700, transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.02)"; }} onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}>Audit</button>
+          </div>
+
+          {/* DYNAMIC PILL */}
+          <div style={mCard({ display: "flex", alignItems: "center", padding: "8px 8px 8px 16px", borderRadius: 100, gap: 12, border: "1px solid rgba(255,255,255,0.12)" })}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, paddingRight: 12, borderRight: "1px solid rgba(255,255,255,0.1)", flexShrink: 0 }}>
+              <div style={{ color: T.blue }}><ModuleIcon name="Web Attacks" size={18} color="currentColor" /></div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>Dynamic</span>
+            </div>
+            <input type="text" placeholder="https://example.com" value={dynamicUrl} onChange={e => setDynamicUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && onScan("dynamic", dynamicUrl)}
+              style={{ flex: 1, background: "none", border: "none", color: "#fff", fontSize: 15, outline: "none", padding: "4px 8px" }} />
+            <button onClick={() => onScan("dynamic", dynamicUrl)} style={{ padding: "10px 24px", borderRadius: 100, border: "none", cursor: "pointer", background: T.blue, color: "#fff", fontSize: 13, fontWeight: 700, transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.02)"; }} onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}>Scan</button>
+          </div>
         </div>
-        {error && <p style={{ marginTop: 12, fontSize: 14, color: T.red }}>{error}</p>}
+
+        {error && <p style={{ marginTop: 24, fontSize: 14, color: T.red, fontWeight: 500 }}>{error}</p>}
       </div>
     </div>
   );
@@ -271,16 +436,17 @@ function LandingView({ url, setUrl, scan, error }: { url: string; setUrl: (v: st
    SCANNING
    ═══════════════════════════════════════════════════════════════ */
 
-function ScanningView({ url, phase }: { url: string; phase: number }) {
+function ScanningView({ url, phase, mode, phases }: { url: string; phase: number; mode: string; phases: string[] }) {
+  const isStatic = mode === "static";
   return (
     <Shell>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "calc(100vh - 60px)", padding: 24 }}>
         <div style={{ textAlign: "center", maxWidth: 420, animation: "fadeIn 0.5s ease-out" }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", border: `3px solid ${M.border}`, borderTopColor: T.blue, animation: "spinLoader 1.2s linear infinite", margin: "0 auto 28px" }} />
-          <h2 style={{ fontSize: 20, fontWeight: 600, color: T.text, marginBottom: 6 }}>Scanning repository…</h2>
-          <p style={{ fontSize: 13, color: M.dim, fontFamily: "monospace", marginBottom: 32 }}>{url.replace(/https?:\/\/github\.com\//, "")}</p>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", border: `3px solid ${M.border}`, borderTopColor: isStatic ? T.blue : T.blue, animation: "spinLoader 1.2s linear infinite", margin: "0 auto 28px" }} />
+          <h2 style={{ fontSize: 20, fontWeight: 600, color: T.text, marginBottom: 6 }}>{isStatic ? "Scanning repository…" : "Analyzing website…"}</h2>
+          <p style={{ fontSize: 13, color: M.dim, fontFamily: "monospace", marginBottom: 32 }}>{url.replace(/https?:\/\/(github\.com\/)?/, "")}</p>
           <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 10 }}>
-            {PHASES.map((p, i) => (
+            {phases.map((p, i) => (
               <div key={p} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
                 <div style={{ width: 20, height: 20, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, flexShrink: 0, ...(i < phase ? { background: `${T.green}20`, color: T.green } : i === phase ? { background: T.blue, animation: "pulseDot 1.5s ease-in-out infinite" } : { border: `1.5px solid ${M.border}` }) }}>
                   {i < phase ? "✓" : ""}
@@ -289,7 +455,7 @@ function ScanningView({ url, phase }: { url: string; phase: number }) {
               </div>
             ))}
           </div>
-          <p style={{ marginTop: 32, fontSize: 11, color: M.dim }}>Usually takes 15–30s</p>
+          <p style={{ marginTop: 32, fontSize: 11, color: M.dim }}>Usually takes {isStatic ? "15–30s" : "30–60s"}</p>
         </div>
       </div>
     </Shell>
@@ -300,7 +466,8 @@ function ScanningView({ url, phase }: { url: string; phase: number }) {
    VIEW: DASHBOARD — modern bento grid
    ═══════════════════════════════════════════════════════════════ */
 
-function DashboardView({ report, onModuleClick, onHome }: { report: Report; onModuleClick: (name: string) => void; onHome: () => void }) {
+function DashboardView({ report, onModuleClick, onHome, mode, url }: { report: Report; onModuleClick: (name: string) => void; onHome: () => void; mode: "static" | "dynamic"; url: string }) {
+  const isStatic = mode === "static";
   const score = report.overall_score ?? 0;
   const animated = useCountUp(score);
   const totalIssues = report.summary.total_issues;
@@ -315,6 +482,28 @@ function DashboardView({ report, onModuleClick, onHome }: { report: Report; onMo
       <div style={{ maxWidth: 1260, margin: "0 auto", padding: "28px 24px 80px", animation: "dashboardReveal 0.6s ease-out" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
           <button onClick={onHome} style={{ ...linkBtn, fontSize: 14 }}>← New Scan</button>
+          <button
+            onClick={() => generatePDF(report, mode, url)}
+            style={{
+              ...linkBtn,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 16px",
+              background: "rgba(255,255,255,0.05)",
+              borderRadius: 100,
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "#fff",
+              fontWeight: 600
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download PDF Report
+          </button>
         </div>
 
         {/* ── ROW 1: Hero + Stat + Persona ────────────────── */}
@@ -332,14 +521,21 @@ function DashboardView({ report, onModuleClick, onHome }: { report: Report; onMo
               background: "radial-gradient(ellipse at 30% 80%, rgba(120,80,220,0.35), transparent 60%), radial-gradient(ellipse at 70% 20%, rgba(40,180,200,0.25), transparent 50%)",
             }} />
             <div style={{ position: "relative", zIndex: 1, padding: "32px 36px", display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%" }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.55)", marginBottom: 8 }}>Audit Report</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.55)", marginBottom: 8 }}>{isStatic ? "Audit Report" : "Dynamic Audit"}</div>
               <div style={{ fontSize: 96, fontWeight: 900, lineHeight: 1, color: "#fff", letterSpacing: "-3px", fontVariantNumeric: "tabular-nums" }}>{animated}</div>
               <div style={{
                 marginTop: 20, padding: "10px 20px",
                 background: "rgba(0,0,0,0.3)", backdropFilter: "blur(14px)", borderRadius: 10,
                 fontSize: 14, color: "rgba(255,255,255,0.85)", lineHeight: 1.5, maxWidth: 380,
               }}>
-                {score >= 80 ? "Your repo is production-ready. Core security controls are solid." : score >= 50 ? "Some areas need attention before deployment. Review the flagged modules." : "Critical vulnerabilities found. Not safe to deploy."}
+                {isStatic ? (
+                  score >= 80 ? "Your repo is production-ready. Core security controls are solid." : score >= 50 ? "Some areas need attention before deployment. Review the flagged modules." : "Critical vulnerabilities found. Not safe to deploy."
+                ) : (
+                  score >= 80 ? "Website security is robust. Baseline scans look clean." : score >= 50 ? "Runtime issues detected. Review attack surface findings." : "Website under threat. Critical vulnerabilities detected."
+                )}
+              </div>
+              <div style={{ marginTop: 12, fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}>
+                Target: {isStatic ? url.replace(/https?:\/\/github\.com\//, "") : url}
               </div>
             </div>
           </div>
@@ -617,7 +813,7 @@ function IssueGroup({ label, color, issues }: { label: string; color: string; is
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ background: M.bg, minHeight: "100vh", color: T.text }}>
+    <div style={{ minHeight: "100vh", color: T.text }}>
       <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", borderBottom: `1px solid ${M.border}` }}>
         <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>Ybe Check</span>
         <a href="https://github.com/darshiyer/A2K2-PS1" target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: M.dim, textDecoration: "none" }}>GitHub ↗</a>
@@ -659,3 +855,26 @@ const linkBtn: React.CSSProperties = {
   background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
   fontSize: 13, color: M.dim, padding: 0, transition: "all 0.15s",
 };
+
+/** ─── GLOBAL ANIMATIONS ─── **/
+if (typeof document !== "undefined") {
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes fadeMoveUp {
+      0% { transform: translateY(0); opacity: 1; filter: blur(0); }
+      100% { transform: translateY(-40%); opacity: 0; filter: blur(15px); }
+    }
+    .fade-up-slow {
+      animation: fadeMoveUp 10s cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+    }
+    @keyframes fadeIn {
+      0% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+    @keyframes dashboardReveal {
+      0% { opacity: 0; transform: translateY(20px); filter: blur(10px); }
+      100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+    }
+  `;
+  document.head.appendChild(style);
+}

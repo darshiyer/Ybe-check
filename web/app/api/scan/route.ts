@@ -24,14 +24,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const rawUrl = body?.url;
+    const mode = body?.mode || "static"; // Default to static
+
     if (!rawUrl || typeof rawUrl !== "string") {
       return NextResponse.json(
         { error: "Missing or invalid 'url' in request body" },
         { status: 400 }
       );
     }
-
-    const repoUrl = normalizeGitUrl(rawUrl);
 
     if (!fs.existsSync(CLI_PATH)) {
       return NextResponse.json(
@@ -43,19 +43,35 @@ export async function POST(request: NextRequest) {
     tempDir = path.join(os.tmpdir(), `ybe-scan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     fs.mkdirSync(tempDir, { recursive: true });
 
-    execSync(`git clone --depth 1 ${repoUrl} "${tempDir}"`, {
-      stdio: "pipe",
-      timeout: 60_000,
-    });
+    let cliArgs = `python3 "${CLI_PATH}" "${tempDir}" --json`;
+    const env = { ...process.env };
 
-    const output = execSync(
-      `python3 "${CLI_PATH}" "${tempDir}" --json`,
-      {
-        cwd: A2K2_DIR,
-        encoding: "utf-8",
-        timeout: 120_000,
+    if (mode === "dynamic") {
+      // DYNAMIC MODE: Validate as website URL, skip clone
+      if (!rawUrl.startsWith("http")) {
+        return NextResponse.json(
+          { error: "Dynamic analysis requires a valid website URL (starting with http:// or https://)" },
+          { status: 400 }
+        );
       }
-    );
+      env.YBECK_TARGET_URL = rawUrl;
+      cliArgs += " --dynamic";
+    } else {
+      // STATIC MODE: Clone repository
+      const repoUrl = normalizeGitUrl(rawUrl);
+      execSync(`git clone --depth 1 ${repoUrl} "${tempDir}"`, {
+        stdio: "pipe",
+        timeout: 60_000,
+      });
+      cliArgs += " --static";
+    }
+
+    const output = execSync(cliArgs, {
+      cwd: A2K2_DIR,
+      encoding: "utf-8",
+      timeout: 300_000, // Increase timeout for dynamic scans (ZAP/DOCKER take time)
+      env,
+    });
 
     const report = JSON.parse(output.trim());
     return NextResponse.json(report);
