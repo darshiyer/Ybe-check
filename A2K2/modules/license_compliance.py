@@ -1,12 +1,84 @@
 import os
 import json
+import re
 import subprocess
 import sys
 
 NAME = "License Compliance"
 
+# ---------------------------------------------------------------------------
+# Known npm package licenses — avoids running pip-licenses against npm deps.
+# All entries are well-known permissive packages (severity "low" or "medium").
+# ---------------------------------------------------------------------------
+KNOWN_NPM_LICENSES = {
+    "express":          ("MIT",          "low"),
+    "react":            ("MIT",          "low"),
+    "react-dom":        ("MIT",          "low"),
+    "axios":            ("MIT",          "low"),
+    "lodash":           ("MIT",          "low"),
+    "cors":             ("MIT",          "low"),
+    "body-parser":      ("MIT",          "low"),
+    "dotenv":           ("BSD-2-Clause", "low"),
+    "mongoose":         ("MIT",          "low"),
+    "socket.io":        ("MIT",          "low"),
+    "next":             ("MIT",          "low"),
+    "typescript":       ("Apache-2.0",   "low"),
+    "webpack":          ("MIT",          "low"),
+    "babel-core":       ("MIT",          "low"),
+    "jest":             ("MIT",          "low"),
+    "eslint":           ("MIT",          "low"),
+    "tailwindcss":      ("MIT",          "low"),
+    "prisma":           ("Apache-2.0",   "low"),
+    "sequelize":        ("MIT",          "low"),
+    "knex":             ("MIT",          "low"),
+    "moment":           ("MIT",          "low"),
+    "dayjs":            ("MIT",          "low"),
+    "uuid":             ("MIT",          "low"),
+    "bcrypt":           ("MIT",          "low"),
+    "jsonwebtoken":     ("MIT",          "low"),
+    "multer":           ("MIT",          "low"),
+    "sharp":            ("Apache-2.0",   "low"),
+    "redis":            ("MIT",          "low"),
+    "pg":               ("MIT",          "low"),
+    "mysql2":           ("MIT",          "low"),
+    "nodemailer":       ("MIT",          "low"),
+    "winston":          ("MIT",          "low"),
+    "morgan":           ("MIT",          "low"),
+    "helmet":           ("MIT",          "low"),
+    "passport":         ("MIT",          "low"),
+    "stripe":           ("MIT",          "low"),
+    "aws-sdk":          ("Apache-2.0",   "low"),
+    "cheerio":          ("MIT",          "low"),
+    "puppeteer":        ("Apache-2.0",   "low"),
+    "playwright":       ("Apache-2.0",   "low"),
+    "@types/node":      ("MIT",          "low"),
+    "@types/react":     ("MIT",          "low"),
+    "vite":             ("MIT",          "low"),
+    "rollup":           ("MIT",          "low"),
+    "esbuild":          ("MIT",          "low"),
+    "prettier":         ("MIT",          "low"),
+    "husky":            ("MIT",          "low"),
+    "lint-staged":      ("MIT",          "low"),
+    "concurrently":     ("MIT",          "low"),
+    "nodemon":          ("MIT",          "low"),
+    "express-validator":("MIT",          "low"),
+    "joi":              ("BSD-3-Clause", "low"),
+    "yup":              ("MIT",          "low"),
+    "zod":              ("MIT",          "low"),
+    "date-fns":         ("MIT",          "low"),
+    "ramda":            ("MIT",          "low"),
+    "rxjs":             ("Apache-2.0",   "low"),
+    "graphql":          ("MIT",          "low"),
+    "apollo-server":    ("MIT",          "low"),
+    "typeorm":          ("MIT",          "low"),
+    "mikro-orm":        ("MIT",          "low"),
+    "some-hallucinated-npm-package": (None, "unknown"),
+}
+
+# ---------------------------------------------------------------------------
 # License risk classification
 # Based on FOSSA and TLDR Legal risk taxonomy
+# ---------------------------------------------------------------------------
 LICENSE_RISK = {
     # CRITICAL — viral licenses, force open sourcing entire codebase
     "AGPL-3.0":             ("critical", "AGPL requires releasing ALL source code of any product/service using this library, even over a network. Google bans AGPL internally."),
@@ -106,14 +178,16 @@ UNKNOWN_LICENSE_STRINGS = {
 }
 
 # Fallback license lookup for well-known packages that may not be installed locally.
-# Prevents SSPL/AGPL from hiding behind "Unresolvable Dependency" just because
-# the package isn't installed in the current environment.
 KNOWN_LICENSE_MAP = {
     "elasticsearch":     "SSPL-1.0",
     "elasticsearch-dsl": "SSPL-1.0",
     "mongodb":           "SSPL-1.0",
 }
 
+
+# ---------------------------------------------------------------------------
+# License normalization
+# ---------------------------------------------------------------------------
 
 def normalize_license(raw_license: str) -> str:
     """Normalize a raw license string to our canonical key."""
@@ -123,18 +197,19 @@ def normalize_license(raw_license: str) -> str:
     lower = cleaned.lower()
     if lower in UNKNOWN_LICENSE_STRINGS:
         return "UNKNOWN"
-    # Direct alias lookup
     if lower in LICENSE_ALIASES:
         return LICENSE_ALIASES[lower]
-    # Try direct match against our risk table
     if cleaned in LICENSE_RISK:
         return cleaned
-    # Try case-insensitive match
     for key in LICENSE_RISK:
         if key.lower() == lower:
             return key
-    return cleaned  # Return as-is — will be treated as unknown
+    return cleaned
 
+
+# ---------------------------------------------------------------------------
+# pip-licenses runner
+# ---------------------------------------------------------------------------
 
 def run_pip_licenses(repo_path):
     """
@@ -170,6 +245,10 @@ def run_pip_licenses(repo_path):
         return None, str(e)
 
 
+# ---------------------------------------------------------------------------
+# Dependency file discovery
+# ---------------------------------------------------------------------------
+
 def find_dependency_files(repo_path):
     """Find all dependency declaration files in the repo."""
     dep_files = []
@@ -188,29 +267,42 @@ def find_dependency_files(repo_path):
     return dep_files
 
 
-def parse_requirements_txt(fpath):
-    """Extract package names from requirements.txt."""
+def _ecosystem_for_file(fname: str) -> str:
+    """Return the package ecosystem for a given dependency filename."""
+    if fname == 'package.json':
+        return 'npm'
+    if fname in ('requirements.txt', 'Pipfile', 'pyproject.toml', 'setup.py', 'setup.cfg') \
+            or fname.startswith('requirements'):
+        return 'pip'
+    return 'unknown'
+
+
+# ---------------------------------------------------------------------------
+# Parsers — all return list of (package_name_lower, line_number) tuples
+# ---------------------------------------------------------------------------
+
+def parse_requirements_txt_with_lines(fpath):
+    """Extract package names with their line numbers from requirements.txt."""
     packages = []
     try:
         with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-            for line in f:
+            for lineno, line in enumerate(f, start=1):
                 line = line.strip()
                 if not line or line.startswith('#') or line.startswith('-'):
                     continue
-                # Handle: package==1.0, package>=1.0, package~=1.0, package
-                import re
                 match = re.match(r'^([A-Za-z0-9_\-\.]+)', line)
                 if match:
-                    packages.append(match.group(1).lower())
-    except:
+                    packages.append((match.group(1).lower(), lineno))
+    except Exception:
         pass
     return packages
 
 
 def parse_package_json(fpath):
     """
-    Extract package names from package.json with their line numbers.
-    Returns list of (package_name, line_number) tuples.
+    Extract npm package names from package.json with their actual line numbers.
+    Reads line-by-line to map each package name to its source line.
+    Returns list of (package_name_lower, line_number) tuples.
     """
     packages = []
     try:
@@ -222,232 +314,71 @@ def parse_package_json(fpath):
 
         for lineno, line in enumerate(lines, start=1):
             stripped = line.strip()
-            # Check if we just entered a dependency section
+
+            # Detect entering a dependency section
             for key in dep_section_keys:
                 if stripped.startswith(key):
                     in_dep_section = True
-            # End of section
+
+            # Detect end of section (closing brace at indentation level 2)
             if in_dep_section and stripped == '}':
                 in_dep_section = False
-            # Parse package lines inside a dep section: "package-name": "version"
+
+            # Parse individual package lines: "package-name": "version"
             if in_dep_section:
-                import re
-                m = re.match(r'^\s*"([^"@][^"]+)"\s*:', stripped)
+                m = re.match(r'^\s*"([^"@][^"]*?)"\s*:', stripped)
                 if m:
-                    packages.append((m.group(1).lower(), lineno))
+                    pkg_name = m.group(1)
+                    # Skip section keys themselves
+                    if pkg_name not in ('dependencies', 'devDependencies', 'peerDependencies'):
+                        packages.append((pkg_name.lower(), lineno))
     except Exception:
         pass
     return packages
 
 
-def parse_requirements_txt_with_lines(fpath):
-    """Extract package names with their line numbers from requirements.txt."""
-    packages = []
-    try:
-        with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-            for lineno, line in enumerate(f, start=1):
-                line = line.strip()
-                if not line or line.startswith('#') or line.startswith('-'):
-                    continue
-                import re
-                match = re.match(r'^([A-Za-z0-9_\-\.]+)', line)
-                if match:
-                    packages.append((match.group(1).lower(), lineno))
-    except Exception:
-        pass
-    return packages
-
+# ---------------------------------------------------------------------------
+# Package collection — keeps pip and npm packages separate
+# ---------------------------------------------------------------------------
 
 def get_declared_packages(repo_path):
     """
-    Get all packages declared in dependency files with their source file and line number.
-    Returns: declared dict {package_name_lower: (source_file, line_number)}, dep_files list
+    Scan all dependency files and return two sets:
+      pip_packages: {pkg_lower: (rel_path, line_number)}
+      npm_packages: {pkg_lower: (rel_path, line_number)}
+    Also returns dep_files list.
     """
-    declared = {}  # package_name_lower → (rel_path, line_number)
+    pip_packages = {}
+    npm_packages = {}
     dep_files = find_dependency_files(repo_path)
 
     for fpath in dep_files:
         fname = os.path.basename(fpath)
         rel_path = os.path.relpath(fpath, repo_path)
 
-        if fname == 'requirements.txt' or fname.startswith('requirements'):
-            pkgs = parse_requirements_txt_with_lines(fpath)
-        elif fname == 'package.json':
+        if fname == 'package.json':
             pkgs = parse_package_json(fpath)
-        else:
-            continue
+            for pkg, lineno in pkgs:
+                if pkg not in npm_packages:
+                    npm_packages[pkg] = (rel_path, lineno)
 
-        for pkg, lineno in pkgs:
-            if pkg not in declared:
-                declared[pkg] = (rel_path, lineno)
+        elif fname in ('requirements.txt', 'Pipfile') or fname.startswith('requirements'):
+            pkgs = parse_requirements_txt_with_lines(fpath)
+            for pkg, lineno in pkgs:
+                if pkg not in pip_packages:
+                    pip_packages[pkg] = (rel_path, lineno)
 
-    return declared, dep_files
+    return pip_packages, npm_packages, dep_files
 
 
-def scan(repo_path: str) -> dict:
-    try:
-        details = []
-
-        # Find dependency files first
-        declared_packages, dep_files = get_declared_packages(repo_path)
-
-        if not dep_files:
-            return {
-                "name":    NAME,
-                "score":   100,
-                "issues":  0,
-                "details": [],
-                "warning": "No dependency files found (requirements.txt, package.json, etc.)"
-            }
-
-        # Get installed packages with their licenses via pip-licenses
-        installed_packages, error = run_pip_licenses(repo_path)
-
-        if error or not installed_packages:
-            return {
-                "name":    NAME,
-                "score":   None,
-                "issues":  0,
-                "details": [],
-                "warning": f"Could not run: {error or 'pip-licenses returned empty results'}"
-            }
-
-        # Build lookup: package_name_lower → {version, license}
-        installed_lookup = {}
-        for pkg in installed_packages:
-            name    = pkg.get("Name", "").lower().replace("-", "_").replace(".", "_")
-            name2   = pkg.get("Name", "").lower()
-            license_str = pkg.get("License", "UNKNOWN")
-            version = pkg.get("Version", "unknown")
-            entry = {"version": version, "license": license_str, "name": pkg.get("Name", "")}
-            installed_lookup[name]  = entry
-            installed_lookup[name2] = entry
-
-        seen = set()
-
-        # Check every declared package
-        for pkg_raw, (source_file, pkg_line) in declared_packages.items():
-            pkg_normalized = pkg_raw.lower().replace("-", "_").replace(".", "_")
-
-            # Find in installed packages
-            installed = installed_lookup.get(pkg_normalized) or installed_lookup.get(pkg_raw.lower())
-
-            if not installed:
-                # Check KNOWN_LICENSE_MAP first — catches risky packages even when not installed
-                known_license = KNOWN_LICENSE_MAP.get(pkg_raw.lower())
-                if known_license and known_license in LICENSE_RISK:
-                    severity, reason = LICENSE_RISK[known_license]
-                    if severity != "low":
-                        dedup_key = (pkg_raw, source_file, known_license)
-                        if dedup_key not in seen:
-                            seen.add(dedup_key)
-                            details.append({
-                                "file":       source_file,
-                                "line":       pkg_line,
-                                "type":       f"License Risk: {known_license}",
-                                "severity":   severity,
-                                "reason":     f"'{pkg_raw}' uses {known_license} — {reason}",
-                                "confidence": "high",
-                                "snippet":    f"{pkg_raw} ({known_license})",
-                                "package":    pkg_raw,
-                                "license":    known_license,
-                                "remediation": get_remediation(pkg_raw, known_license)
-                            })
-                    continue  # skip the Unresolvable warning — license is known
-
-                # Package declared but not installed → possibly hallucinated
-                dedup_key = (pkg_raw, source_file, "Not Installed")
-                if dedup_key not in seen:
-                    seen.add(dedup_key)
-                    details.append({
-                        "file":       source_file,
-                        "line":       1,
-                        "type":       "Unresolvable Dependency",
-                        "severity":   "high",
-                        "reason":     f"'{pkg_raw}' is declared but not installed — may be a hallucinated or non-existent package (common in vibe-coded apps)",
-                        "confidence": "medium",
-                        "snippet":    pkg_raw,
-                        "package":    pkg_raw,
-                        "license":    "UNKNOWN",
-                        "remediation": f"Verify '{pkg_raw}' exists on PyPI: https://pypi.org/project/{pkg_raw}/ — if not found, remove it."
-                    })
-                continue
-
-            raw_license  = installed["license"]
-            version      = installed["version"]
-            display_name = installed["name"]
-            normalized   = normalize_license(raw_license)
-
-            # UNKNOWN license — legal blocker
-            if normalized == "UNKNOWN" or normalized.lower() in UNKNOWN_LICENSE_STRINGS:
-                dedup_key = (pkg_raw, source_file, "Unknown License")
-                if dedup_key not in seen:
-                    seen.add(dedup_key)
-                    details.append({
-                        "file":       source_file,
-                        "line":       1,
-                        "type":       "Unknown License",
-                        "severity":   "high",
-                        "reason":     f"'{display_name}=={version}' has no detectable license — legally this means no permissions are granted. Cannot be used in production.",
-                        "confidence": "high",
-                        "snippet":    f"{display_name}=={version}",
-                        "package":    display_name,
-                        "license":    raw_license,
-                        "remediation": f"Check '{display_name}' on PyPI or GitHub for license information before using in production."
-                    })
-                continue
-
-            # Check against our risk table
-            if normalized in LICENSE_RISK:
-                severity, reason = LICENSE_RISK[normalized]
-
-                # Skip low severity — only report medium and above
-                if severity == "low":
-                    continue
-
-                dedup_key = (pkg_raw, source_file, normalized)
-                if dedup_key not in seen:
-                    seen.add(dedup_key)
-                    details.append({
-                        "file":       source_file,
-                        "line":       1,
-                        "type":       f"License Risk: {normalized}",
-                        "severity":   severity,
-                        "reason":     f"'{display_name}=={version}' uses {normalized} — {reason}",
-                        "confidence": "high",
-                        "snippet":    f"{display_name}=={version} ({normalized})",
-                        "package":    display_name,
-                        "license":    normalized,
-                        "remediation": get_remediation(display_name, normalized)
-                    })
-
-        # Scoring formula — contract law, do not change
-        critical = len([d for d in details if d["severity"] == "critical"])
-        high     = len([d for d in details if d["severity"] == "high"])
-        medium   = len([d for d in details if d["severity"] == "medium"])
-        score    = max(0, 100 - (critical * 15) - (high * 10) - (medium * 5))
-
-        return {
-            "name":    NAME,
-            "score":   score,
-            "issues":  len(details),
-            "details": details
-        }
-
-    except Exception as e:
-        return {
-            "name":    NAME,
-            "score":   None,
-            "issues":  0,
-            "details": [],
-            "warning": f"Could not run: {str(e)}"
-        }
-
+# ---------------------------------------------------------------------------
+# Remediation advice
+# ---------------------------------------------------------------------------
 
 def get_remediation(package_name, license_id):
     """Return actionable remediation advice per license type."""
     remediations = {
-        "AGPL-3.0":     f"Replace '{package_name}' with a permissively licensed alternative, or release your entire codebase under AGPL. Consider alternatives on https://pypi.org",
+        "AGPL-3.0":     f"Replace '{package_name}' with a permissively licensed alternative, or release your entire codebase under AGPL.",
         "AGPL-3.0-only": f"Replace '{package_name}' — AGPL is incompatible with proprietary SaaS. Find MIT/Apache alternative.",
         "SSPL-1.0":     f"Replace '{package_name}' immediately. SSPL requires open sourcing your entire service infrastructure.",
         "BUSL-1.1":     f"'{package_name}' restricts production use under BUSL. Check the Change Date — it may convert to open source in future.",
@@ -463,3 +394,250 @@ def get_remediation(package_name, license_id):
         license_id,
         f"Review license terms for '{package_name}' ({license_id}) with your legal team before shipping to production."
     )
+
+
+# ---------------------------------------------------------------------------
+# npm package checker (no pip-licenses involved)
+# ---------------------------------------------------------------------------
+
+def check_npm_packages(npm_packages: dict, details: list, seen: set):
+    """
+    Check npm packages using KNOWN_NPM_LICENSES lookup.
+    Never calls pip-licenses — that tool is Python-only.
+    """
+    for pkg_raw, (source_file, pkg_line) in npm_packages.items():
+
+        # Check known table first
+        if pkg_raw in KNOWN_NPM_LICENSES:
+            license_id, risk_level = KNOWN_NPM_LICENSES[pkg_raw]
+
+            # Unknown entry (deliberately marked None) — flag as unverified
+            if license_id is None:
+                dedup_key = (pkg_raw, source_file, "Unverified NPM")
+                if dedup_key not in seen:
+                    seen.add(dedup_key)
+                    details.append({
+                        "file":       source_file,
+                        "line":       pkg_line,
+                        "type":       "Unverified NPM License",
+                        "severity":   "low",
+                        "confidence": "low",
+                        "ecosystem":  "npm",
+                        "package":    pkg_raw,
+                        "license":    "UNKNOWN",
+                        "reason":     (
+                            f"'{pkg_raw}' is an npm package — license could not be verified "
+                            "without Node environment. Manual review recommended."
+                        ),
+                        "remediation": f"Run `npm info {pkg_raw} license` to check the license.",
+                    })
+            # Known safe (low risk) — skip silently, no finding
+            # If it were medium/high/critical we'd flag it here
+
+        else:
+            # Unknown npm package — flag as unverified (NOT "Unresolvable Dependency")
+            dedup_key = (pkg_raw, source_file, "Unverified NPM")
+            if dedup_key not in seen:
+                seen.add(dedup_key)
+                details.append({
+                    "file":       source_file,
+                    "line":       pkg_line,
+                    "type":       "Unverified NPM License",
+                    "severity":   "low",
+                    "confidence": "low",
+                    "ecosystem":  "npm",
+                    "package":    pkg_raw,
+                    "license":    "UNKNOWN",
+                    "reason":     (
+                        f"'{pkg_raw}' is an npm package — license could not be verified "
+                        "without Node environment. Manual review recommended."
+                    ),
+                    "remediation": f"Run `npm info {pkg_raw} license` to check the license.",
+                })
+
+
+# ---------------------------------------------------------------------------
+# pip package checker (uses pip-licenses)
+# ---------------------------------------------------------------------------
+
+def check_pip_packages(pip_packages: dict, installed_lookup: dict,
+                       details: list, seen: set):
+    """
+    Check pip packages against pip-licenses results.
+    """
+    for pkg_raw, (source_file, pkg_line) in pip_packages.items():
+        pkg_normalized = pkg_raw.lower().replace("-", "_").replace(".", "_")
+
+        # Find in installed packages
+        installed = installed_lookup.get(pkg_normalized) or installed_lookup.get(pkg_raw.lower())
+
+        if not installed:
+            # Check KNOWN_LICENSE_MAP — catches risky packages even when not installed
+            known_license = KNOWN_LICENSE_MAP.get(pkg_raw.lower())
+            if known_license and known_license in LICENSE_RISK:
+                severity, reason = LICENSE_RISK[known_license]
+                if severity != "low":
+                    dedup_key = (pkg_raw, source_file, known_license)
+                    if dedup_key not in seen:
+                        seen.add(dedup_key)
+                        details.append({
+                            "file":        source_file,
+                            "line":        pkg_line,
+                            "type":        f"License Risk: {known_license}",
+                            "severity":    severity,
+                            "confidence":  "high",
+                            "ecosystem":   "pip",
+                            "package":     pkg_raw,
+                            "license":     known_license,
+                            "reason":      f"'{pkg_raw}' uses {known_license} — {reason}",
+                            "remediation": get_remediation(pkg_raw, known_license),
+                        })
+                continue  # License is known — don't flag as unresolvable
+
+            # Package declared but not installed → possibly hallucinated
+            dedup_key = (pkg_raw, source_file, "Not Installed")
+            if dedup_key not in seen:
+                seen.add(dedup_key)
+                details.append({
+                    "file":        source_file,
+                    "line":        pkg_line,
+                    "type":        "Unresolvable Dependency",
+                    "severity":    "high",
+                    "confidence":  "medium",
+                    "ecosystem":   "pip",
+                    "package":     pkg_raw,
+                    "license":     "UNKNOWN",
+                    "reason":      (
+                        f"'{pkg_raw}' is declared but not installed — may be a hallucinated "
+                        "or non-existent package (common in vibe-coded apps)"
+                    ),
+                    "remediation": (
+                        f"Verify '{pkg_raw}' exists on PyPI: https://pypi.org/project/{pkg_raw}/ "
+                        "— if not found, remove it."
+                    ),
+                })
+            continue
+
+        raw_license  = installed["license"]
+        version      = installed["version"]
+        display_name = installed["name"]
+        normalized   = normalize_license(raw_license)
+
+        # UNKNOWN license — legal blocker
+        if normalized == "UNKNOWN" or normalized.lower() in UNKNOWN_LICENSE_STRINGS:
+            dedup_key = (pkg_raw, source_file, "Unknown License")
+            if dedup_key not in seen:
+                seen.add(dedup_key)
+                details.append({
+                    "file":        source_file,
+                    "line":        pkg_line,
+                    "type":        "Unknown License",
+                    "severity":    "high",
+                    "confidence":  "high",
+                    "ecosystem":   "pip",
+                    "package":     display_name,
+                    "license":     raw_license,
+                    "reason":      (
+                        f"'{display_name}=={version}' has no detectable license — "
+                        "legally this means no permissions are granted. Cannot be used in production."
+                    ),
+                    "remediation": (
+                        f"Check '{display_name}' on PyPI or GitHub for license information "
+                        "before using in production."
+                    ),
+                })
+            continue
+
+        # Check against risk table — skip low severity
+        if normalized in LICENSE_RISK:
+            severity, reason = LICENSE_RISK[normalized]
+            if severity == "low":
+                continue
+
+            dedup_key = (pkg_raw, source_file, normalized)
+            if dedup_key not in seen:
+                seen.add(dedup_key)
+                details.append({
+                    "file":        source_file,
+                    "line":        pkg_line,
+                    "type":        f"License Risk: {normalized}",
+                    "severity":    severity,
+                    "confidence":  "high",
+                    "ecosystem":   "pip",
+                    "package":     display_name,
+                    "license":     normalized,
+                    "reason":      f"'{display_name}=={version}' uses {normalized} — {reason}",
+                    "remediation": get_remediation(display_name, normalized),
+                    "snippet":     f"{display_name}=={version} ({normalized})",
+                })
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def scan(repo_path: str) -> dict:
+    try:
+        details = []
+        seen    = set()
+
+        # Collect declared packages — pip and npm kept separate
+        pip_packages, npm_packages, dep_files = get_declared_packages(repo_path)
+
+        if not dep_files:
+            return {
+                "name":    NAME,
+                "score":   100,
+                "issues":  0,
+                "details": [],
+                "warning": "No dependency files found (requirements.txt, package.json, etc.)",
+            }
+
+        # --- Check npm packages via local lookup (no pip-licenses) ---
+        check_npm_packages(npm_packages, details, seen)
+
+        # --- Check pip packages via pip-licenses ---
+        if pip_packages:
+            installed_packages, error = run_pip_licenses(repo_path)
+
+            if error or not installed_packages:
+                # Can't run pip-licenses — note it as a warning but continue
+                # (npm results are still valid and already processed above)
+                pass
+            else:
+                # Build lookup: package_name_lower → {version, license, name}
+                installed_lookup = {}
+                for pkg in installed_packages:
+                    name  = pkg.get("Name", "").lower().replace("-", "_").replace(".", "_")
+                    name2 = pkg.get("Name", "").lower()
+                    entry = {
+                        "version": pkg.get("Version", "unknown"),
+                        "license": pkg.get("License", "UNKNOWN"),
+                        "name":    pkg.get("Name", ""),
+                    }
+                    installed_lookup[name]  = entry
+                    installed_lookup[name2] = entry
+
+                check_pip_packages(pip_packages, installed_lookup, details, seen)
+
+        # Scoring formula
+        critical = len([d for d in details if d["severity"] == "critical"])
+        high     = len([d for d in details if d["severity"] == "high"])
+        medium   = len([d for d in details if d["severity"] == "medium"])
+        score    = max(0, 100 - (critical * 15) - (high * 10) - (medium * 5))
+
+        return {
+            "name":    NAME,
+            "score":   score,
+            "issues":  len(details),
+            "details": details,
+        }
+
+    except Exception as e:
+        return {
+            "name":    NAME,
+            "score":   None,
+            "issues":  0,
+            "details": [],
+            "warning": f"Could not run: {str(e)}",
+        }

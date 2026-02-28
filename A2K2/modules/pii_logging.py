@@ -1,5 +1,6 @@
 import os
 import re
+from typing import List, Dict, Set, Tuple
 
 NAME = "PII & Logging"
 
@@ -14,7 +15,6 @@ SKIP_EXTENSIONS = {
 }
 
 # --- PII Patterns ---
-# confidence: how likely the match is a true positive
 PII_PATTERNS = [
     {
         "pattern": re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'),
@@ -45,8 +45,6 @@ PII_PATTERNS = [
         "reason": "Hardcoded PAN number — critical PII violation under DPDP Act"
     },
     {
-        # Requires groups separated by spaces or dashes: 1234-5678-9012-3456
-        # Avoids firing on bare digit sequences like timestamps or IDs
         "pattern": re.compile(r'\b(?:\d{4}[- ]){3}\d{4}\b'),
         "type": "Hardcoded Credit Card",
         "severity": "critical",
@@ -57,49 +55,41 @@ PII_PATTERNS = [
 
 # --- Unsafe Logging ---
 LOG_FUNCTIONS = [
-    "logger.info",
-    "logger.debug",
-    "logger.warning",
-    "logger.error",
-    "logger.critical",
-    "logging.info",
-    "logging.debug",
-    "logging.warning",
-    "logging.error",
-    "console.log",
-    "console.error",
-    "console.warn",
-    "console.debug",
-    "print",
+    "logger.info", "logger.debug", "logger.warning", "logger.error", "logger.critical",
+    "logging.info", "logging.debug", "logging.warning", "logging.error",
+    "console.log", "console.error", "console.warn", "console.debug", "print",
 ]
 
 SENSITIVE_ARGS = [
-    "request", "response", "user", "password",
-    "token", "body", "data", "payload", "req", "res",
-    "credentials", "secret", "auth", "headers", "session",
+    "request", "response", "user", "password", "token", "body", "data", "payload",
+    "req", "res", "credentials", "secret", "auth", "headers", "session",
     "user_data", "userdata", "form", "params"
 ]
 
-# Build one compiled regex per log function
-# Matches: logger.info(request) but NOT logger.info(request.id) or logger.info("string")
-# Pattern: log_func(\s*SENSITIVE_VAR\s*[,)] 
-# The key: after the variable name, we allow only whitespace, comma, or closing paren — NOT a dot
+# --- Config File Patterns ---
+CONFIG_FILE_PATTERNS = [
+    re.compile(r'connection.?profile', re.IGNORECASE),
+    re.compile(r'config\.(js|ts|json|yaml|yml)$', re.IGNORECASE),
+    re.compile(r'settings\.(js|ts|json|yaml|yml)$', re.IGNORECASE),
+    re.compile(r'\.config\.(js|ts)$', re.IGNORECASE),
+    re.compile(r'infrastructure', re.IGNORECASE),
+    re.compile(r'network/', re.IGNORECASE),
+    re.compile(r'crypto.?config', re.IGNORECASE),
+    re.compile(r'docker.?compose', re.IGNORECASE),
+    re.compile(r'k8s/', re.IGNORECASE),
+    re.compile(r'kubernetes/', re.IGNORECASE),
+]
+
 def _build_log_patterns():
     patterns = []
     sensitive_group = '|'.join(re.escape(s) for s in SENSITIVE_ARGS)
     for fn in LOG_FUNCTIONS:
-        # Escape the function name (e.g. logger.info → logger\.info)
         escaped_fn = re.escape(fn)
-        # Match: logger.info(  sensitive_var  ) or logger.info(sensitive_var, ...)
-        # Negative lookahead (?![.\w]) ensures we don't match request.id or request_data
-        pat = re.compile(
-            escaped_fn + r'\s*\(\s*(' + sensitive_group + r')\s*(?![.\w])',
-        )
+        pat = re.compile(escaped_fn + r'\s*\(\s*(' + sensitive_group + r')\s*(?![.\w])')
         patterns.append((fn, pat))
     return patterns
 
 LOG_PATTERNS = _build_log_patterns()
-
 
 def walk_files(repo_path, extensions):
     for root, dirs, files in os.walk(repo_path):
@@ -107,9 +97,7 @@ def walk_files(repo_path, extensions):
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
             if ext in extensions and ext not in SKIP_EXTENSIONS:
-                fpath = os.path.join(root, fname)
-                yield fpath
-
+                yield os.path.join(root, fname)
 
 def read_file(fpath):
     try:
@@ -118,101 +106,138 @@ def read_file(fpath):
     except:
         return []
 
-
 def rel(fpath, repo_path):
     return os.path.relpath(fpath, repo_path)
 
-
 def should_skip_file(rpath):
-    """Skip test/spec/mock files based on relative path."""
     lower = rpath.lower()
     skip_markers = ['test', 'spec', '__mock__', '__tests__', 'fixtures']
     return any(marker in lower for marker in skip_markers)
 
-
 def is_comment_line(line):
-    """Returns True if the line is a comment (Python or JS style)."""
     stripped = line.strip()
     return stripped.startswith('#') or stripped.startswith('//')
 
+def _is_config_file(rpath):
+    return any(pat.search(rpath) for pat in CONFIG_FILE_PATTERNS)
 
-def scan_file(fpath, repo_path, details, seen):
+def _downgrade_severity(severity):
+    if severity == "critical": return "high"
+    if severity == "high":     return "medium"
+    if severity == "medium":   return "low"
+    return severity
+
+def scan_file(fpath, repo_path, seen) -> List[Dict]:
+    file_findings = []
     lines = read_file(fpath)
     rpath = rel(fpath, repo_path)
+    is_config = _is_config_file(rpath)
 
     for i, line in enumerate(lines):
         line_no = i + 1
-
-        # Skip comment lines entirely
-        if is_comment_line(line):
-            continue
-
+        if is_comment_line(line): continue
         stripped = line.strip()
         line_matched_phone = False
 
-        # --- Part 1: PII Pattern Detection ---
         for pii in PII_PATTERNS:
-            # Skip credit card check if this line already matched a phone number
             if pii["type"] == "Hardcoded Credit Card" and line_matched_phone:
                 continue
             if pii["pattern"].search(stripped):
                 if pii["type"] == "Hardcoded Phone Number":
                     line_matched_phone = True
+                
                 dedup_key = (rpath, line_no, pii["type"])
                 if dedup_key not in seen:
                     seen.add(dedup_key)
-                    details.append({
+                    
+                    sev = pii["severity"]
+                    reason = pii["reason"]
+                    if is_config:
+                        sev = _downgrade_severity(sev)
+                        reason += " [config file — verify this is not user PII]"
+                    
+                    file_findings.append({
                         "file": rpath,
                         "line": line_no,
                         "snippet": stripped,
                         "type": pii["type"],
-                        "severity": pii["severity"],
+                        "severity": sev,
                         "confidence": pii["confidence"],
-                        "reason": pii["reason"]
+                        "reason": reason
                     })
 
-        # --- Part 2: Unsafe Logging Detection ---
         for fn_name, pattern in LOG_PATTERNS:
             if pattern.search(stripped):
                 dedup_key = (rpath, line_no, "Unsafe Logging")
                 if dedup_key not in seen:
                     seen.add(dedup_key)
-                    details.append({
+                    
+                    sev = "high"
+                    reason = f"Full object passed to {fn_name}() — may expose PII or secrets in logs"
+                    if is_config:
+                        sev = _downgrade_severity(sev)
+                        reason += " [config file — verify this is not user PII]"
+                    
+                    file_findings.append({
                         "file": rpath,
                         "line": line_no,
                         "snippet": stripped,
                         "type": "Unsafe Logging",
-                        "severity": "high",
+                        "severity": sev,
                         "confidence": "high",
-                        "reason": f"Full object passed to {fn_name}() — may expose PII or secrets in logs"
+                        "reason": reason
                     })
-                break  # Only flag once per line even if multiple patterns match
-
+                break
+    return file_findings
 
 def scan(repo_path: str) -> dict:
     try:
-        details = []
+        all_findings = []
         seen = set()
 
         for fpath in walk_files(repo_path, {'.py', '.js', '.ts'}):
             rpath = rel(fpath, repo_path)
-            if should_skip_file(rpath):
-                continue
-            scan_file(fpath, repo_path, details, seen)
+            if should_skip_file(rpath): continue
+            
+            file_findings = scan_file(fpath, repo_path, seen)
+            
+            # Collapse repeated findings of the SAME type in the SAME file
+            findings_by_type = {}
+            for f in file_findings:
+                ftype = f["type"]
+                if ftype not in findings_by_type:
+                    findings_by_type[ftype] = []
+                findings_by_type[ftype].append(f)
+            
+            for ftype, findings in findings_by_type.items():
+                if len(findings) > 5:
+                    # Keep first 3
+                    all_findings.extend(findings[:3])
+                    # Add summary for the rest
+                    last = findings[-1]
+                    rem_count = len(findings) - 3
+                    all_findings.append({
+                        "file": rpath,
+                        "line": 0,
+                        "type": f"{ftype} (repeated)",
+                        "severity": last["severity"],
+                        "reason": f"{rem_count} additional {ftype.lower()}s found in this file — review entire file",
+                        "confidence": "medium"
+                    })
+                else:
+                    all_findings.extend(findings)
 
-        # Scoring formula — contract law, do not change
-        critical = len([d for d in details if d["severity"] == "critical"])
-        high     = len([d for d in details if d["severity"] == "high"])
-        medium   = len([d for d in details if d["severity"] == "medium"])
+        critical = len([d for d in all_findings if d["severity"] == "critical"])
+        high     = len([d for d in all_findings if d["severity"] == "high"])
+        medium   = len([d for d in all_findings if d["severity"] == "medium"])
         score    = max(0, 100 - (critical * 15) - (high * 10) - (medium * 5))
 
         return {
             "name": NAME,
             "score": score,
-            "issues": len(details),
-            "details": details
+            "issues": len(all_findings),
+            "details": all_findings
         }
-
     except Exception as e:
         return {
             "name": NAME,

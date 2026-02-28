@@ -33,6 +33,54 @@ SKIP_EXTENSIONS: Set[str] = {
     ".sqlite", ".db", ".sqlite3",
 }
 
+# ---------------------------------------------------------------------------
+# Path-based suppression — skip findings in known infrastructure / test paths.
+# These are legitimate key files (TLS certs, test fixtures) not leaked secrets.
+# ---------------------------------------------------------------------------
+
+SUPPRESSED_PATH_SEGMENTS: Set[str] = {
+    'tls',
+    'crypto-config',
+    'crypto_config',
+    'x509',
+    'certs',
+    'certificates',
+    'test-fixtures',
+    'fixtures',
+    '__fixtures__',
+    'testdata',
+    'test_data',
+    'mock',
+    'mocks',
+    '__mocks__',
+    'migrations',
+    'node_modules',
+}
+
+SUPPRESSED_FILENAME_PATTERNS: List[re.Pattern] = [
+    re.compile(r'.*\.pem$',           re.IGNORECASE),
+    re.compile(r'.*\.crt$',           re.IGNORECASE),
+    re.compile(r'.*\.cer$',           re.IGNORECASE),
+    re.compile(r'server\.key$',       re.IGNORECASE),
+    re.compile(r'client\.key$',       re.IGNORECASE),
+    re.compile(r'ca\.key$',           re.IGNORECASE),
+    re.compile(r'.*_test\.go$',       re.IGNORECASE),
+    re.compile(r'.*\.test\.(js|ts)$', re.IGNORECASE),
+]
+
+
+def _is_suppressed(rel_path: str) -> bool:
+    """
+    Return True if a file should be excluded from secret scanning.
+    Checks path segments and filename patterns against the suppression lists.
+    """
+    # Normalise separators so both / and os.sep work
+    parts = set(rel_path.replace('\\', '/').split('/'))
+    if parts & SUPPRESSED_PATH_SEGMENTS:
+        return True
+    fname = os.path.basename(rel_path)
+    return any(pat.match(fname) for pat in SUPPRESSED_FILENAME_PATTERNS)
+
 MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB
 
 
@@ -220,14 +268,22 @@ ENV_ASSIGNMENT_PATTERN = re.compile(
 )
 
 
-def _run_keyword_scan(repo_path: str) -> List[Dict]:
+def _run_keyword_scan(repo_path: str) -> Tuple[List[Dict], int]:
+    """Returns (details, suppressed_count)."""
     details: List[Dict] = []
     seen: Set[str] = set()
+    suppressed_count = 0
     for fpath in _walk_files(repo_path):
         content = _read_file(fpath)
         if content is None:
             continue
         rel_path = os.path.relpath(fpath, repo_path)
+
+        # --- Path suppression check ---
+        if _is_suppressed(rel_path):
+            suppressed_count += 1
+            continue
+
         fname = os.path.basename(fpath).lower()
         is_env_file = fname.startswith(".env") or fname == "env"
         lines = content.splitlines()
@@ -274,7 +330,7 @@ def _run_keyword_scan(repo_path: str) -> List[Dict]:
                             "severity": "high",
                             "reason": "Do not commit .env with real values; use .env.example with placeholders and load secrets at runtime.",
                         })
-    return details
+    return details, suppressed_count
 
 
 # ---------------------------------------------------------------------------
@@ -288,15 +344,25 @@ def scan(repo_path: str) -> Dict:
             "name": NAME,
             "score": None,
             "issues": 0,
+            "suppressed": 0,
             "details": [],
             "warning": "Path is not a directory",
         }
     ds_details, ds_warning = _run_detect_secrets(repo_path)
-    kw_details = _run_keyword_scan(repo_path)
+    kw_details, suppressed_count = _run_keyword_scan(repo_path)
+
+    # Also suppress detect-secrets findings from infrastructure paths
+    ds_details_filtered = []
+    for d in ds_details:
+        if _is_suppressed(d.get("file", "")):
+            suppressed_count += 1
+        else:
+            ds_details_filtered.append(d)
+
     # Merge and dedupe by file:line:type
     seen: Set[str] = set()
     details: List[Dict] = []
-    for d in ds_details + kw_details:
+    for d in ds_details_filtered + kw_details:
         f, ln, t = d.get("file"), d.get("line"), d.get("type")
         key = f"{f}:{ln}:{t}"
         if key in seen:
@@ -314,6 +380,7 @@ def scan(repo_path: str) -> Dict:
             "name": NAME,
             "score": None,
             "issues": 0,
+            "suppressed": suppressed_count,
             "details": [],
             "warning": ds_warning,
         }
@@ -322,6 +389,7 @@ def scan(repo_path: str) -> Dict:
         "name": NAME,
         "score": score,
         "issues": len(details),
+        "suppressed": suppressed_count,
         "details": details,
     }
     if ds_warning:

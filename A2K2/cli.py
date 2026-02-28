@@ -248,9 +248,36 @@ def add_confidence(detail: dict) -> dict:
     return {**detail, "confidence": "high" if sev in ("critical", "high") else sev}
 
 
-def determine_status(score, issues: int) -> str:
+# Phrases that indicate a module was intentionally skipped due to a missing
+# optional external tool — NOT an unexpected crash. These come from module
+# warning strings when tools like trivy, syft, artillery, ffuf are absent.
+SKIP_WARNING_PHRASES = (
+    "not found",
+    "not installed",
+    "install with",
+    "No target URL",
+    "env var",
+)
+
+
+def _is_skip_warning(warning: str) -> bool:
+    """Return True if the warning string indicates a missing optional tool."""
+    if not warning:
+        return False
+    lower = warning.lower()
+    return any(phrase.lower() in lower for phrase in SKIP_WARNING_PHRASES)
+
+
+def determine_status(score, issues: int, warning: str = "") -> str:
+    """
+    Derive the module status string.
+      - 'skipped'   : score is None AND warning indicates a missing optional tool
+      - 'errored'   : score is None due to an unexpected crash
+      - 'no_issues' : score == 100 and zero issues found
+      - 'completed' : ran successfully and found ≥1 issue
+    """
     if score is None:
-        return "errored"
+        return "skipped" if _is_skip_warning(warning) else "errored"
     if score == 100 and issues == 0:
         return "no_issues"
     return "completed"
@@ -291,15 +318,17 @@ def build_summary(modules_out: list) -> dict:
     with what is actually reported — not the module's raw 'issues' integer.
     """
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
-    modules_passed = modules_failed = modules_errored = 0
+    modules_passed = modules_failed = modules_errored = modules_skipped = 0
 
     for m in modules_out:
         status = m.get("status", "errored")
         if status == "errored":
             modules_errored += 1
+        elif status == "skipped":
+            modules_skipped += 1
         elif status == "no_issues":
             modules_passed += 1
-        else:
+        else:  # "completed"
             modules_failed += 1
 
         for detail in m.get("details", []):
@@ -317,6 +346,7 @@ def build_summary(modules_out: list) -> dict:
         "modules_passed": modules_passed,
         "modules_failed": modules_failed,
         "modules_errored": modules_errored,
+        "modules_skipped": modules_skipped,
     }
 
 
@@ -425,7 +455,10 @@ def run_scan(repo_path: str, static_only: bool = False) -> dict:
             d["rule_id"] = f"{rule_prefix}-{idx:03d}"
             enriched_details.append(d)
 
-        status = determine_status(raw_score, raw_issues)
+        # Determine status — pass the warning string so we can distinguish
+        # 'skipped' (missing optional tool) from 'errored' (unexpected crash)
+        raw_warning = raw_result.get("warning", "")
+        status = determine_status(raw_score, raw_issues, warning=raw_warning)
 
         module_entry = {
             "name": display_name,
@@ -437,11 +470,13 @@ def run_scan(repo_path: str, static_only: bool = False) -> dict:
             "details": enriched_details,
         }
 
-        # Preserve warning/error from the raw result if present
+        # Preserve warning/error/suppressed from the raw result if present
         if raw_result.get("warning"):
             module_entry["warning"] = raw_result["warning"]
         if raw_result.get("error"):
             module_entry["error"] = raw_result["error"]
+        if "suppressed" in raw_result:
+            module_entry["suppressed"] = raw_result["suppressed"]
 
         modules_out.append(module_entry)
 

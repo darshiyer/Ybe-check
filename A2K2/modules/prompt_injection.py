@@ -13,6 +13,32 @@ SKIP_EXTENSIONS = {
     '.pyc', '.lock', '.vsix', '.db'
 }
 
+# --- STAGE 1: Repo-level LLM detection ---
+LLM_IMPORT_SIGNATURES = [
+    'openai',
+    'anthropic', 
+    'langchain',
+    'llamaindex',
+    'llama_index',
+    'cohere',
+    'groq',
+    'mistral',
+    'huggingface',
+    'transformers',
+    'google.generativeai',
+    'genai',
+    'bedrock',
+    'aiplatform',
+    'vertexai',
+]
+
+# --- Path suppression for non-application files ---
+SUPPRESSED_PATH_SEGMENTS = {
+    'network', 'crypto-config', 'crypto_config', 'infrastructure',
+    'k8s', 'kubernetes', 'helm', 'terraform', 'ansible',
+    'migrations', 'fixtures', 'testdata', '__fixtures__'
+}
+
 # --- Prompt-like variable names we care about ---
 PROMPT_VAR_NAMES = {
     'system_prompt', 'system_message', 'systemprompt',
@@ -50,35 +76,57 @@ JAILBREAK_PHRASES = [
     'ignore your training',
     'act as if you have no restrictions',
     'you have no restrictions',
+    'you have no restrictions',
 ]
 
 # --- Prompt-like keys in YAML/JSON that reliably indicate LLM prompts ---
-# Narrowed to avoid false-positives on generic YAML config files.
-# 'system' and 'template' alone are too broad — they appear everywhere.
 PROMPT_KEYS = {'system_prompt', 'prompt', 'instruction', 'system_message'}
 
-# Strong LLM-context keys: if any of these appear in the SAME file,
-# it's much safer to trust that 'prompt'/'template' etc. are LLM-related.
+# Strong LLM-context keys for YAML/JSON files
 LLM_CONTEXT_KEYS = {
     'model', 'temperature', 'max_tokens', 'top_p', 'stop', 'messages',
     'llm', 'openai', 'anthropic', 'gemini', 'completion', 'embedding'
 }
 
-# File/directory path fragments that indicate non-LLM config — skip these files
-NON_LLM_YAML_PATH_FRAGMENTS = {
-    'crypto-config', 'cryptoconfig', 'network/', 'docker-compose',
-    'kubernetes', 'k8s/', 'helm/', 'ci/', '.github/', 'ansible',
-    'terraform', 'configmap', 'values.yaml', 'chart.yaml',
-}
+
+def _is_suppressed_path(fpath, repo_path):
+    """Return True if the file path contains any suppressed segments."""
+    rel_path = os.path.relpath(fpath, repo_path).replace('\\', '/')
+    parts = rel_path.split('/')
+    for segment in SUPPRESSED_PATH_SEGMENTS:
+        if segment in parts:
+            return True
+    return False
 
 
-def walk_files(repo_path, extensions):
+def detect_llm_libraries(repo_path):
+    """
+    Scan ALL .py, .js, .ts files for LLM library signatures.
+    Returns True if any found.
+    """
+    extensions = {'.py', '.js', '.ts'}
+    for fpath in walk_files(repo_path, extensions, skip_suppressed=False):
+        try:
+            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read().lower()
+                for sig in LLM_IMPORT_SIGNATURES:
+                    if sig in content:
+                        return True
+        except:
+            continue
+    return False
+
+
+def walk_files(repo_path, extensions, skip_suppressed=True):
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
             if ext in extensions and ext not in SKIP_EXTENSIONS:
-                yield os.path.join(root, fname)
+                fpath = os.path.join(root, fname)
+                if skip_suppressed and _is_suppressed_path(fpath, repo_path):
+                    continue
+                yield fpath
 
 
 def read_file(fpath):
@@ -102,49 +150,26 @@ def already_flagged(seen, fpath, line_no):
 
 
 def check_unsafe_template(line):
-    """
-    Returns True if the line assigns a prompt-like variable
-    to an f-string or concatenation involving user input.
-    """
-    # Must be an assignment to a prompt-like variable
     var_pattern = r'(' + '|'.join(re.escape(v) for v in PROMPT_VAR_NAMES) + r')'
     if not re.search(var_pattern, line):
         return False
-
-    # Check for f-string with user input variable inside
     for uvar in USER_INPUT_VARS:
-        # f"...{user_input}..." or f'...{user_input}...'
         if re.search(r'f["\'].*\{' + re.escape(uvar) + r'[\s\}]', line):
             return True
-        # "..." + user_input  or  prompt + user_input
         if re.search(re.escape(uvar), line) and ('+' in line or '.format(' in line):
             return True
-
-    # .format(user=, input=, query=, message=)
     format_keys = ['user', 'input', 'query', 'message', 'request', 'content']
     for fkey in format_keys:
         if re.search(r'\.format\s*\(.*' + re.escape(fkey) + r'\s*=', line):
             return True
-
     return False
 
 
 def check_multiline_prompt(lines, i):
-    """
-    Two-pass scan for multiline prompt assignments. Catches:
-        system_prompt = (
-            f"You are helpful. "
-            f"Answer this: {user_input}"
-        )
-    Looks ahead up to 5 lines from a prompt variable assignment
-    for user-input variable interpolation in f-strings.
-    """
     line = lines[i].strip()
     var_pattern = r'(' + '|'.join(re.escape(v) for v in PROMPT_VAR_NAMES) + r')'
     if not re.search(var_pattern, line):
         return False
-
-    # Look ahead up to 5 lines for user input vars in f-strings
     window = lines[i:min(len(lines), i + 5)]
     combined = ' '.join(l.strip() for l in window)
     for uvar in USER_INPUT_VARS:
@@ -154,7 +179,6 @@ def check_multiline_prompt(lines, i):
 
 
 def check_jailbreak(line):
-    """Returns the matched phrase if a jailbreak phrase is found in the line."""
     lower = line.lower()
     for phrase in JAILBREAK_PHRASES:
         if phrase.lower() in lower:
@@ -163,7 +187,6 @@ def check_jailbreak(line):
 
 
 def has_guardrails(lines, line_index, window=10):
-    """Check ±window lines around line_index for guardrail keywords."""
     start = max(0, line_index - window)
     end = min(len(lines), line_index + window + 1)
     context = ' '.join(lines[start:end]).lower()
@@ -174,17 +197,14 @@ def has_guardrails(lines, line_index, window=10):
 
 
 def scan_code_file(fpath, repo_path, details, seen):
-    """Scan .py / .js / .ts files."""
     lines = read_file(fpath)
     rpath = rel(fpath, repo_path)
-
     prompt_var_found = False
 
     for i, line in enumerate(lines):
         stripped = line.strip()
         line_no = i + 1
 
-        # --- Detector A: Unsafe Prompt Templates (single-line) ---
         if check_unsafe_template(stripped):
             if not already_flagged(seen, rpath, line_no):
                 details.append({
@@ -196,7 +216,6 @@ def scan_code_file(fpath, repo_path, details, seen):
                     "confidence": "high",
                     "reason": "User input concatenated directly into prompt without sanitization — enables prompt injection"
                 })
-        # --- Detector A2: Multiline prompt template fallback ---
         elif check_multiline_prompt(lines, i):
             if not already_flagged(seen, rpath, line_no):
                 details.append({
@@ -209,12 +228,9 @@ def scan_code_file(fpath, repo_path, details, seen):
                     "reason": "User input appears in a multi-line prompt assignment — potential prompt injection across lines"
                 })
 
-        # --- Track if we saw a prompt-like variable ---
         for vname in PROMPT_VAR_NAMES:
             if vname in stripped:
                 prompt_var_found = True
-
-                # --- Detector B: Missing Guardrails ---
                 if not has_guardrails(lines, i):
                     flag_key = (rpath, line_no, 'guardrail')
                     if flag_key not in seen:
@@ -230,7 +246,6 @@ def scan_code_file(fpath, repo_path, details, seen):
                         })
                 break
 
-        # --- Detector C: Jailbreak Phrases ---
         matched = check_jailbreak(stripped)
         if matched:
             if not already_flagged(seen, rpath, line_no):
@@ -243,57 +258,33 @@ def scan_code_file(fpath, repo_path, details, seen):
                     "confidence": "high",
                     "reason": f"Prompt contains language that enables jailbreak attacks (matched: '{matched}')"
                 })
-
     return prompt_var_found
 
 
-def _file_likely_llm(fpath: str) -> bool:
-    """Return False if the file path strongly suggests it is NOT an LLM config."""
-    lower = fpath.replace('\\', '/').lower()
-    for fragment in NON_LLM_YAML_PATH_FRAGMENTS:
-        if fragment in lower:
-            return False
-    return True
-
-
 def _file_has_llm_context(lines: list) -> bool:
-    """Return True if any LLM-specific keys exist anywhere in the file."""
-    combined = ' '.join(lines).lower()
-    return any(kw in combined for kw in LLM_CONTEXT_KEYS)
+    content = ' '.join(lines).lower()
+    return any(kw in content for kw in LLM_CONTEXT_KEYS)
 
 
 def scan_yaml_file(fpath, repo_path, details, seen):
-    """Scan .yaml / .yml files for prompt keys."""
-    # Skip files that are clearly not LLM configs
-    rel_fpath = os.path.relpath(fpath, repo_path).replace('\\', '/')
-    if not _file_likely_llm(rel_fpath):
-        return False
-
     lines = read_file(fpath)
     rpath = rel(fpath, repo_path)
     prompt_found = False
-
-    # Only flag 'Missing Prompt Guardrails' in YAML if the file also contains
-    # LLM-specific context keywords — avoids false positives on infra configs.
     has_llm_ctx = _file_has_llm_context(lines)
 
     for i, line in enumerate(lines):
         stripped = line.strip()
         line_no = i + 1
-
         key_match = re.match(r'^([a-zA-Z_]+)\s*:\s*(.*)', stripped)
         if not key_match:
             continue
 
         key = key_match.group(1).lower()
         value = key_match.group(2).strip().strip('"\'')
-
         if key not in PROMPT_KEYS:
             continue
 
         prompt_found = True
-
-        # Detector A: user input interpolated into prompt value
         for uvar in USER_INPUT_VARS:
             if '{' + uvar + '}' in value or '{' + uvar + ' ' in value:
                 if not already_flagged(seen, rpath, line_no):
@@ -307,7 +298,6 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                         "reason": "User input interpolated into YAML prompt value without sanitization"
                     })
 
-        # Detector B: Missing guardrails — only if strong LLM context present
         if has_llm_ctx and not has_guardrails(lines, i, window=10):
             flag_key = (rpath, line_no, 'guardrail')
             if flag_key not in seen:
@@ -322,7 +312,6 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                     "reason": "System prompt in YAML has no refusal or boundary instructions — vulnerable to jailbreaking"
                 })
 
-        # Detector C: Jailbreak phrases in value
         matched = check_jailbreak(value)
         if matched:
             if not already_flagged(seen, rpath, line_no):
@@ -335,90 +324,65 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                     "confidence": "high",
                     "reason": f"YAML prompt value contains jailbreak-enabling language (matched: '{matched}')"
                 })
-
     return prompt_found
 
 
 def scan_json_file(fpath, repo_path, details, seen):
-    """Scan .json files for prompt keys."""
     import json as jsonlib
     rpath = rel(fpath, repo_path)
     prompt_found = False
-
     try:
         with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
             raw = f.read()
         data = jsonlib.loads(raw)
     except:
-        return prompt_found
-
-    # Flatten all string values with their approximate line numbers
+        return False
     lines = raw.splitlines()
 
     def find_line(key, value):
-        """Find the line number of a key:value pair in raw JSON."""
         search = f'"{key}"'
         for idx, l in enumerate(lines):
             if search in l:
                 return idx + 1
         return 1
 
-    def walk_json(obj, path=""):
+    def walk_json(obj):
         nonlocal prompt_found
         if isinstance(obj, dict):
             for k, v in obj.items():
                 if k.lower() in PROMPT_KEYS and isinstance(v, str):
                     prompt_found = True
                     line_no = find_line(k, v)
-
-                    # Detector A
                     for uvar in USER_INPUT_VARS:
                         if '{' + uvar + '}' in v:
                             if not already_flagged(seen, rpath, line_no):
                                 details.append({
-                                    "file": rpath,
-                                    "line": line_no,
-                                    "snippet": v[:120],
-                                    "type": "Unsafe Prompt Template",
-                                    "severity": "critical",
-                                    "confidence": "high",
-                                    "reason": "User input interpolated into JSON prompt value without sanitization"
+                                    "file": rpath, "line": line_no, "snippet": v[:120],
+                                    "type": "Unsafe Prompt Template", "severity": "critical",
+                                    "confidence": "high", "reason": "User input interpolated into JSON prompt value without sanitization"
                                 })
-
-                    # Detector B — check value itself for guardrails
-                    has_guard = any(kw.lower() in v.lower() for kw in GUARDRAIL_KEYWORDS)
-                    if not has_guard:
+                    if not any(kw.lower() in v.lower() for kw in GUARDRAIL_KEYWORDS):
                         flag_key = (rpath, line_no, 'guardrail')
                         if flag_key not in seen:
                             seen.add(flag_key)
                             details.append({
-                                "file": rpath,
-                                "line": line_no,
-                                "snippet": v[:120],
-                                "type": "Missing Prompt Guardrails",
-                                "severity": "high",
-                                "confidence": "medium",
-                                "reason": "JSON prompt value has no refusal or boundary instructions — vulnerable to jailbreaking"
+                                "file": rpath, "line": line_no, "snippet": v[:120],
+                                "type": "Missing Prompt Guardrails", "severity": "high",
+                                "confidence": "medium", "reason": "JSON prompt value has no refusal or boundary instructions"
                             })
-
-                    # Detector C
                     matched = check_jailbreak(v)
                     if matched:
                         if not already_flagged(seen, rpath, line_no):
                             details.append({
-                                "file": rpath,
-                                "line": line_no,
-                                "snippet": v[:120],
-                                "type": "Jailbreak Vulnerable Prompt",
-                                "severity": "critical",
-                                "confidence": "high",
-                                "reason": f"JSON prompt contains jailbreak-enabling language (matched: '{matched}')"
+                                "file": rpath, "line": line_no, "snippet": v[:120],
+                                "type": "Jailbreak Vulnerable Prompt", "severity": "critical",
+                                "confidence": "high", "reason": f"JSON prompt contains jailbreak-enabling language (matched: '{matched}')"
                             })
                 else:
-                    walk_json(v, path + '.' + k)
+                    walk_json(v)
         elif isinstance(obj, list):
             for item in obj:
-                walk_json(item, path)
+                walk_json(item)
 
     walk_json(data)
     return prompt_found
@@ -426,29 +390,36 @@ def scan_json_file(fpath, repo_path, details, seen):
 
 def scan(repo_path: str) -> dict:
     try:
+        # --- STAGE 1: Repo-level detection ---
+        if not detect_llm_libraries(repo_path):
+            return {
+                "name": NAME,
+                "score": 100,
+                "issues": 0,
+                "details": [],
+                "warning": "No LLM libraries detected in this repo — prompt injection scan skipped."
+            }
+
         details = []
         seen = set()
         prompt_found_anywhere = False
 
         # Scan code files
         for fpath in walk_files(repo_path, {'.py', '.js', '.ts'}):
-            found = scan_code_file(fpath, repo_path, details, seen)
-            if found:
+            if scan_code_file(fpath, repo_path, details, seen):
                 prompt_found_anywhere = True
 
         # Scan YAML files
         for fpath in walk_files(repo_path, {'.yaml', '.yml'}):
-            found = scan_yaml_file(fpath, repo_path, details, seen)
-            if found:
+            if scan_yaml_file(fpath, repo_path, details, seen):
                 prompt_found_anywhere = True
 
         # Scan JSON files
         for fpath in walk_files(repo_path, {'.json'}):
-            found = scan_json_file(fpath, repo_path, details, seen)
-            if found:
+            if scan_json_file(fpath, repo_path, details, seen):
                 prompt_found_anywhere = True
 
-        # Edge case: no LLM prompts detected at all
+        # Stage 2: No LLM prompts detected at all
         if not prompt_found_anywhere:
             return {
                 "name": NAME,
@@ -458,7 +429,6 @@ def scan(repo_path: str) -> dict:
                 "warning": "No LLM prompts detected in this repo"
             }
 
-        # Scoring formula — contract law, do not change
         critical = len([d for d in details if d["severity"] == "critical"])
         high     = len([d for d in details if d["severity"] == "high"])
         medium   = len([d for d in details if d["severity"] == "medium"])
