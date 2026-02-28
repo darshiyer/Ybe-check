@@ -40,16 +40,38 @@ type Module = {
   name: string;
   score: number | null;
   issues: number;
+  status: string;
+  rule_prefix: string;
   details: Issue[];
   warning?: string;
   error?: string;
 };
 
+type TopFix = {
+  priority: number;
+  severity: string;
+  rule_id: string;
+  module: string;
+  file: string;
+  line: number | null;
+  action: string;
+};
+
 type Report = {
   overall_score: number;
   verdict: string;
+  summary: {
+    total_issues: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    modules_passed: number;
+    modules_failed: number;
+    modules_errored: number;
+  };
   modules: Module[];
-  top_fixes?: string[];
+  top_fixes: TopFix[];
 };
 
 /* ─── HELPERS ────────────────────────────────────────────── */
@@ -281,12 +303,11 @@ function ScanningView({ url, phase }: { url: string; phase: number }) {
 function DashboardView({ report, onModuleClick, onHome }: { report: Report; onModuleClick: (name: string) => void; onHome: () => void }) {
   const score = report.overall_score ?? 0;
   const animated = useCountUp(score);
-  const color = scoreColor(score);
-  const totalIssues = report.modules.reduce((a, m) => a + (m.issues || 0), 0);
-  const highCount = report.modules.reduce((a, m) => a + m.details.filter(d => ["high", "critical"].includes((d.severity || "").toLowerCase())).length, 0);
+  const totalIssues = report.summary.total_issues;
+  const highCount = report.summary.critical + report.summary.high;
   const animIssues = useCountUp(totalIssues, 1000);
   const animModules = useCountUp(report.modules.length, 800);
-  const passCount = report.modules.filter(m => (m.score ?? 0) >= 80).length;
+  const passCount = report.summary.modules_passed;
   const sorted = [...report.modules].sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
 
   return (
@@ -421,9 +442,12 @@ function DashboardView({ report, onModuleClick, onHome }: { report: Report; onMo
                 <div style={{ fontSize: 12, fontWeight: 600, color: M.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>TOP FIXES</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                   {report.top_fixes.slice(0, 3).map((fix, i) => (
-                    <div key={i} style={{ padding: "10px 0", borderBottom: i < 2 ? `1px solid ${M.border}` : "none", fontSize: 13, color: T.text2, lineHeight: 1.5, display: "flex", gap: 10 }}>
-                      <span style={{ fontWeight: 800, color: M.dim, fontSize: 12 }}>{i + 1}.</span>
-                      <span>{fix}</span>
+                    <div key={fix.priority} style={{ padding: "10px 0", borderBottom: i < 2 ? `1px solid ${M.border}` : "none", fontSize: 13, color: T.text2, lineHeight: 1.5, display: "flex", gap: 10 }}>
+                      <span style={{ fontWeight: 800, color: M.dim, fontSize: 12 }}>{fix.priority}.</span>
+                      <div style={{ display: "flex", flexDirection: "column" }}>
+                        <span style={{ color: T.text }}>{fix.action}</span>
+                        <span style={{ fontSize: 11, color: M.dimLt, fontFamily: "monospace", marginTop: 2 }}>{fix.file}{fix.line ? `:${fix.line}` : ""}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -454,7 +478,10 @@ function DashboardView({ report, onModuleClick, onHome }: { report: Report; onMo
                   <ModuleIcon name={mod.name} size={20} color={mc} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 6 }}>{mod.name}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{mod.name}</div>
+                    <StatusBadge status={mod.status} />
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ flex: 1, height: 4, borderRadius: 2, background: M.border, overflow: "hidden" }}>
                       <div style={{ height: "100%", borderRadius: 2, background: mc, width: `${ms}%`, transition: "width 0.8s ease-out" }} />
@@ -605,6 +632,25 @@ function Chip({ label, value, color }: { label: string; value: number; color?: s
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 14px", borderRadius: 8, background: `${c}12`, fontSize: 13, fontWeight: 600, color: c }}>
       <span style={{ fontWeight: 800 }}>{value}</span> {label}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  let color = M.dim;
+  let label = status.replace("_", " ").toUpperCase();
+
+  if (status === "no_issues" || status === "passed") color = T.green;
+  if (status === "errored" || status === "failed") color = T.red;
+  if (status === "scanning" || status === "pending") color = T.blue;
+
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6,
+      background: `${color}15`, color: color, letterSpacing: 0.5,
+      border: `1px solid ${color}30`, textTransform: "uppercase"
+    }}>
+      {label}
     </span>
   );
 }
