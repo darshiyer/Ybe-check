@@ -14,35 +14,43 @@ SKIP_EXTENSIONS = {
 }
 
 # --- PII Patterns ---
+# confidence: how likely the match is a true positive
 PII_PATTERNS = [
     {
         "pattern": re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'),
         "type": "Hardcoded Email",
         "severity": "high",
+        "confidence": "high",
         "reason": "Hardcoded email address found — move to environment config"
     },
     {
         "pattern": re.compile(r'\b[6-9]\d{9}\b'),
         "type": "Hardcoded Phone Number",
         "severity": "high",
+        "confidence": "medium",
         "reason": "Hardcoded Indian phone number found — remove from source code"
     },
     {
         "pattern": re.compile(r'\b\d{4}[\s-]\d{4}[\s-]\d{4}\b'),
         "type": "Hardcoded Aadhaar",
         "severity": "critical",
+        "confidence": "high",
         "reason": "Hardcoded Aadhaar number — critical PII violation under DPDP Act"
     },
     {
         "pattern": re.compile(r'\b[A-Z]{5}[0-9]{4}[A-Z]\b'),
         "type": "Hardcoded PAN",
         "severity": "critical",
+        "confidence": "high",
         "reason": "Hardcoded PAN number — critical PII violation under DPDP Act"
     },
     {
-        "pattern": re.compile(r'\b(?:\d[ -]?){13,16}\b'),
+        # Requires groups separated by spaces or dashes: 1234-5678-9012-3456
+        # Avoids firing on bare digit sequences like timestamps or IDs
+        "pattern": re.compile(r'\b(?:\d{4}[- ]){3}\d{4}\b'),
         "type": "Hardcoded Credit Card",
         "severity": "critical",
+        "confidence": "low",
         "reason": "Possible hardcoded credit card number — critical financial PII"
     }
 ]
@@ -140,10 +148,16 @@ def scan_file(fpath, repo_path, details, seen):
             continue
 
         stripped = line.strip()
+        line_matched_phone = False
 
         # --- Part 1: PII Pattern Detection ---
         for pii in PII_PATTERNS:
+            # Skip credit card check if this line already matched a phone number
+            if pii["type"] == "Hardcoded Credit Card" and line_matched_phone:
+                continue
             if pii["pattern"].search(stripped):
+                if pii["type"] == "Hardcoded Phone Number":
+                    line_matched_phone = True
                 dedup_key = (rpath, line_no, pii["type"])
                 if dedup_key not in seen:
                     seen.add(dedup_key)
@@ -153,6 +167,7 @@ def scan_file(fpath, repo_path, details, seen):
                         "snippet": stripped,
                         "type": pii["type"],
                         "severity": pii["severity"],
+                        "confidence": pii["confidence"],
                         "reason": pii["reason"]
                     })
 
@@ -168,6 +183,7 @@ def scan_file(fpath, repo_path, details, seen):
                         "snippet": stripped,
                         "type": "Unsafe Logging",
                         "severity": "high",
+                        "confidence": "high",
                         "reason": f"Full object passed to {fn_name}() — may expose PII or secrets in logs"
                     })
                 break  # Only flag once per line even if multiple patterns match
