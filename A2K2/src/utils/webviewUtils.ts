@@ -14,13 +14,20 @@ export function showYbeCheckReport(
         { enableScripts: true, retainContextWhenHidden: true }
     );
 
+    panel.reveal();
     panel.webview.html = generateReportHtml(report);
+}
+
+function escapeHtml(text: string): string {
+    const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return text.replace(/[&<>"']/g, (c) => map[c] || c);
 }
 
 function generateReportHtml(report: any): string {
     const score = report.overall_score || 0;
     const modules = report.modules || [];
     const totalIssues = modules.reduce((sum: number, m: any) => sum + (m.issues || 0), 0);
+    const topFixes: string[] = report.top_fixes || [];
 
     const scoreColor = score >= 80 ? '#00e676' : score >= 40 ? '#ffd740' : '#ff5252';
     const scoreGlow = score >= 80 ? '0 0 40px rgba(0,230,118,0.3)' : score >= 40 ? '0 0 40px rgba(255,215,64,0.3)' : '0 0 40px rgba(255,82,82,0.3)';
@@ -246,6 +253,23 @@ function generateReportHtml(report: any): string {
                 font-size: 11px;
                 color: #555;
             }
+
+            .fix-list {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+            }
+            .fix-item {
+                padding: 10px 14px;
+                margin-bottom: 8px;
+                background: rgba(92,124,250,0.08);
+                border: 1px solid rgba(92,124,250,0.15);
+                border-radius: 8px;
+                font-size: 13px;
+                color: #b8c5f0;
+                line-height: 1.4;
+            }
+            .fix-item:last-child { margin-bottom: 0; }
 
             /* ---- BREAKDOWN ---- */
             .breakdown {
@@ -492,7 +516,7 @@ function generateReportHtml(report: any): string {
                 </div>
                 <div class="verdict">
                     <span class="verdict-icon">${scoreIcon}</span>
-                    ${scoreLabel}
+                    ${report.verdict || scoreLabel}
                 </div>
                 <div class="stats-row">
                     <div class="stat-chip"><strong>${modules.length}</strong> module${modules.length !== 1 ? 's' : ''} scanned</div>
@@ -501,6 +525,15 @@ function generateReportHtml(report: any): string {
                 </div>
                 <div class="timestamp">Scanned at ${timestamp}</div>
             </div>
+
+            ${topFixes.length > 0 ? `
+            <div class="breakdown top-fixes">
+                <div class="section-label">Top fixes</div>
+                <ul class="fix-list">
+                    ${topFixes.map((fix: string) => `<li class="fix-item">${escapeHtml(fix)}</li>`).join('')}
+                </ul>
+            </div>
+            ` : ''}
 
             ${sortedTypes.length > 0 ? `
             <div class="breakdown">

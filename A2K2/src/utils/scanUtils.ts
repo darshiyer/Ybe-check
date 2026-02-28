@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { logMessage, createSeparatorLogLine } from './loggingUtils';
 import { setTargetPath } from './fileUtils';
+import { updateStatusBarMessage } from './statusBarUtils';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -83,6 +84,9 @@ export async function executeScan(
             const report = JSON.parse(stdout);
 
             logMessage(createSeparatorLogLine(`Ybe Check completed: Score ${report.overall_score}/100`), 'info');
+
+            const score = report.overall_score != null ? report.overall_score : 0;
+            updateStatusBarMessage(`$(shield) Ybe Check: ${score}/100`);
 
             const { showYbeCheckReport } = require('./webviewUtils');
             await showYbeCheckReport(report, context);
