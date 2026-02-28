@@ -90,9 +90,9 @@ def walk_files(repo_path):
 
 # ── MAIN ENTRY POINT ─────────────────────────────────────────
 
-def run(repo_path: str) -> dict:
+def scan(repo_path: str) -> dict:
     try:
-        issues = []
+        details = []
         total_penalty = 0
         has_only_markers = True  # Track if we only have LOW-severity markers
 
@@ -110,15 +110,13 @@ def run(repo_path: str) -> dict:
                 line = lines[line_num]
                 for pattern in AI_MARKER_PATTERNS:
                     if pattern.search(line):
-                        issues.append({
+                        details.append({
                             "type": "AI Generation Marker",
-                            "severity": "LOW",
+                            "severity": "low",
                             "file": relative,
                             "line": line_num + 1,
-                            "description": f"AI-generated code marker detected: "
-                                           f"\"{line.strip()[:100]}\"",
-                            "recommendation": "Ensure AI-generated code has been "
-                                              "reviewed and tested before production."
+                            "snippet": line.strip()[:100],
+                            "reason": "AI-generated code marker detected — ensure code has been reviewed."
                         })
                         total_penalty += 2
                         break  # One match per line is enough
@@ -128,16 +126,13 @@ def run(repo_path: str) -> dict:
                 for pattern in PROMPT_ARTIFACT_PATTERNS:
                     if pattern.search(line):
                         has_only_markers = False
-                        issues.append({
+                        details.append({
                             "type": "Prompt Artifact",
-                            "severity": "MEDIUM",
+                            "severity": "medium",
                             "file": relative,
                             "line": line_num + 1,
-                            "description": f"LLM conversational artifact found: "
-                                           f"\"{line.strip()[:100]}\"",
-                            "recommendation": "Remove LLM prompt artifacts from "
-                                              "production code. These indicate "
-                                              "unreviewed AI output."
+                            "snippet": line.strip()[:100],
+                            "reason": "LLM conversational artifact found (e.g. 'Certainly!', 'Here is the code') — indicates unreviewed output."
                         })
                         total_penalty += 5
                         break  # One match per line
@@ -146,22 +141,18 @@ def run(repo_path: str) -> dict:
             for match in MARKDOWN_BACKTICK_PATTERN.finditer(full_text):
                 has_only_markers = False
                 line_num = full_text[:match.start()].count('\n') + 1
-                issues.append({
+                details.append({
                     "type": "Markdown Artifact",
-                    "severity": "HIGH",
+                    "severity": "high",
                     "file": relative,
                     "line": line_num,
-                    "description": "Triple backticks (```) found in code file. "
-                                   "This indicates raw LLM output was "
-                                   "accidentally committed.",
-                    "recommendation": "Remove markdown formatting artifacts. "
-                                      "Extract the actual code from the LLM "
-                                      "response before committing."
+                    "snippet": "```",
+                    "reason": "Triple backticks found in code file — indicates raw LLM output was accidentally committed."
                 })
                 total_penalty += 10
 
         # ── SCORING ───────────────────────────────────────────
-        if not issues:
+        if not details:
             score = 100
         else:
             # Cap total deduction at 40
@@ -176,21 +167,17 @@ def run(repo_path: str) -> dict:
             score = max(score, 0)
 
         return {
-            "module": NAME,
+            "name": "AI Traceability",
             "score": score,
-            "issues": issues
+            "issues": len(details),
+            "details": details
         }
 
     except Exception as e:
         return {
-            "module": NAME,
+            "name": "AI Traceability",
             "score": None,
-            "issues": [{
-                "type": "Module Error",
-                "severity": "HIGH",
-                "file": ".",
-                "line": None,
-                "description": f"Could not run AI traceability scan: {e}",
-                "recommendation": "Check that the repo path is valid and accessible."
-            }]
+            "issues": 0,
+            "details": [],
+            "warning": f"Could not run AI traceability scan: {e}"
         }

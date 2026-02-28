@@ -18,7 +18,11 @@ ALL_MODULES = [
     "modules.prompt_injection",
     "modules.pii_logging",
     "modules.dependencies",
-    "modules.auth_guards"
+    "modules.auth_guards",
+    "modules.iac_security",
+    "modules.license_compliance",
+    "modules.ai_traceability",
+    "modules.test_coverage"
 ]
 
 # Static-only modules (no network calls, no dynamic analysis)
@@ -26,7 +30,11 @@ STATIC_MODULES = [
     "modules.secrets",
     "modules.prompt_injection",
     "modules.pii_logging",
-    "modules.auth_guards"
+    "modules.auth_guards",
+    "modules.iac_security",
+    "modules.license_compliance",
+    "modules.ai_traceability",
+    "modules.test_coverage"
 ]
 
 def load_modules(static_only=False):

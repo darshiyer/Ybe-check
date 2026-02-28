@@ -120,9 +120,9 @@ def parse_package_json_deps(pkg_path):
 
 # ── MAIN SCAN ────────────────────────────────────────────────
 
-def run(repo_path: str) -> dict:
+def scan(repo_path: str) -> dict:
     try:
-        issues = []
+        details = []
 
         # ── STEP 1: Scan for test directories and test files ──
         test_dirs_found = []
@@ -195,131 +195,112 @@ def run(repo_path: str) -> dict:
                     break
 
         # ── STEP 4: Scan for AI-generated markers ────────────
-        files_scanned = 0
         for fpath in all_code_files:
             lines = read_lines_safe(fpath)
             # Only scan first 30 lines (markers usually at top)
-            for line_num, line in enumerate(lines[:30], 1):
+            for line_no, line in enumerate(lines[:30], 1):
                 for marker_pattern in AI_MARKERS:
                     if marker_pattern.search(line):
                         ai_markers_found.append({
                             "file": rel(fpath, repo_path),
-                            "line": line_num,
-                            "content": line.strip()[:120]
+                            "line": line_no,
+                            "snippet": line.strip()[:100]
                         })
                         break  # One match per line is enough
-            files_scanned += 1
 
-        # ── STEP 5: Build issues list ─────────────────────────
+        # ── STEP 5: Build details list ─────────────────────────
         has_test_files = len(test_files_found) > 0
         has_test_dirs = len(test_dirs_found) > 0
 
         # No test files at all
         if not has_test_files:
-            issues.append({
+            details.append({
                 "type": "No Test Files",
-                "severity": "HIGH",
+                "severity": "high",
                 "file": ".",
-                "line": None,
-                "description": "No automated test files found in the repository. "
-                               "Looked for test_*.py, *_test.py, *.spec.js, *.test.js patterns.",
-                "recommendation": "Add unit tests using pytest (Python) or jest/mocha (Node.js). "
-                                  "Create a tests/ directory and write test files."
+                "line": 0,
+                "reason": "No automated test files found (test_*.py, *.test.js, etc.)"
             })
 
         # No test directory
         if not has_test_dirs and not has_test_files:
-            issues.append({
+            details.append({
                 "type": "No Test Directory",
-                "severity": "HIGH",
+                "severity": "high",
                 "file": ".",
-                "line": None,
-                "description": "No standard test directory found (tests/, test/, __tests__/).",
-                "recommendation": "Create a tests/ folder to organize your test files."
+                "line": 0,
+                "reason": "No standard test directory found (tests/, test/)"
             })
 
         # Framework in deps but no test files
         if has_any_framework and not has_test_files:
-            frameworks = list(python_frameworks_found | node_frameworks_found)
-            issues.append({
+            details.append({
                 "type": "Test Framework Unused",
-                "severity": "MEDIUM",
+                "severity": "medium",
                 "file": "requirements.txt" if python_frameworks_found else "package.json",
-                "line": None,
-                "description": f"Test framework(s) installed ({', '.join(frameworks)}) "
-                               f"but no test files found.",
-                "recommendation": "Write actual test files that use the installed test framework."
+                "line": 0,
+                "reason": "Test framework installed but no test files found written"
             })
 
         # Test files exist but no framework in dependencies
         if has_test_files and not has_any_framework:
-            issues.append({
+            details.append({
                 "type": "Missing Test Framework Dependency",
-                "severity": "MEDIUM",
+                "severity": "medium",
                 "file": "requirements.txt",
-                "line": None,
-                "description": f"Found {len(test_files_found)} test file(s) but no test framework "
-                               f"declared in dependencies (e.g., pytest, jest, mocha).",
-                "recommendation": "Add pytest (or your preferred framework) to requirements.txt. "
-                                  "Run: pip install pytest && pip freeze | grep pytest >> requirements.txt"
+                "line": 0,
+                "reason": "Test files found but no framework (pytest, jest) in dependencies"
             })
 
         # No coverage tooling
         if not has_coverage:
-            severity = "MEDIUM" if has_test_files else "LOW"
-            issues.append({
+            details.append({
                 "type": "No Coverage Tooling",
-                "severity": severity,
+                "severity": "medium" if has_test_files else "low",
                 "file": ".",
-                "line": None,
-                "description": "No test coverage tooling detected. "
-                               "No .coverage file, coverage.xml, htmlcov/, or pytest-cov dependency found.",
-                "recommendation": "Add pytest-cov to requirements.txt and run: "
-                                  "pytest --cov=. --cov-report=html"
+                "line": 0,
+                "reason": "No test coverage tooling detected (pytest-cov, .coverage, etc.)"
             })
 
         # AI traceability markers
         for marker in ai_markers_found:
-            issues.append({
+            details.append({
                 "type": "AI Generated Code Marker",
-                "severity": "LOW",
+                "severity": "low",
                 "file": marker["file"],
                 "line": marker["line"],
-                "description": f"AI-generated code marker found: \"{marker['content']}\"",
-                "recommendation": "Review AI-generated code for correctness, security, "
-                                  "and ensure adequate test coverage for generated sections."
+                "snippet": marker["snippet"],
+                "reason": "AI-generated code marker found — ensure adequate test coverage"
             })
 
         # ── STEP 6: Calculate score ───────────────────────────
         score = 100
-
         if not has_test_files and not has_test_dirs:
-            # No tests at all — critical
             score = 10
         elif not has_test_files and has_any_framework:
-            # Framework installed but no tests written
             score = max(0, score - 40)
         else:
-            # Test files exist — apply incremental penalties
-            if not has_any_framework:
-                score = max(0, score - 15)
-            if not has_coverage:
-                score = max(0, score - 20)
-            if has_test_files and has_coverage and has_any_framework:
-                # Everything present — good shape
-                score = min(score, 95)
+            if not has_any_framework: score = max(0, score - 15)
+            if not has_coverage: score = max(0, score - 20)
+            if has_test_files and has_coverage and has_any_framework: score = min(score, 95)
 
-        # Penalty for AI markers (minor, informational)
         if ai_markers_found:
             score = max(0, score - len(ai_markers_found) * 2)
 
-        # Floor at 0
-        score = max(0, score)
-
         return {
-            "module": NAME,
-            "score": score,
-            "issues": issues
+            "name": "Test & Coverage",
+            "score": max(0, score),
+            "issues": len(details),
+            "details": details
+        }
+
+    except Exception as e:
+        return {
+            "name": "Test & Coverage",
+            "score": None,
+            "issues": 0,
+            "details": [],
+            "warning": f"Could not run test coverage scan: {e}"
         }
 
     except Exception as e:

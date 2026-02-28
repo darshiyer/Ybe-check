@@ -548,7 +548,7 @@ function generateReportHtml(report: any): string {
             ${moduleCards}
 
             <div class="footer">
-                Ybe Check v0.5.0 &bull; Security audit for vibe-coded applications
+                Ybe Check v0.9.0 &bull; Security audit for vibe-coded applications
             </div>
         </div>
     </body>
