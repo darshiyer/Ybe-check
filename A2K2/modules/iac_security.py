@@ -54,9 +54,12 @@ def run_checkov(repo_path):
     Uses -o json for machine-readable output.
     Uses --compact to reduce output size.
     """
+    # Resolve to absolute path so checkov never walks into parent dirs
+    repo_abs = os.path.abspath(repo_path)
+
     cmd = [
         "checkov",
-        "-d", repo_path,
+        "-d", repo_abs,
         "-o", "json",
         "--quiet",
         "--compact",
@@ -73,7 +76,7 @@ def run_checkov(repo_path):
             capture_output=True,
             text=True,
             timeout=120,  # 2 min max
-            cwd=repo_path
+            cwd=repo_abs
         )
         # Checkov exits with code 1 when it finds issues — that's normal
         # Only treat it as an error if there's no stdout at all
@@ -149,9 +152,28 @@ def parse_checkov_output(raw_output, repo_path):
                 elif isinstance(check_obj, dict):
                     check_name = check_id + ": " + check_obj.get("name", "Security Misconfiguration")
 
-                # File path — make relative
+                # File path — resolve Checkov's output correctly.
+                # Checkov emits paths like "/docker-compose.yml" — looks absolute
+                # but is actually relative to the scanned repo root.
+                # Strategy: if relpath escapes the repo (starts with ".."),
+                # try treating the path as repo-root-relative first.
                 file_abs  = check.get("file_path", "")
-                file_rel  = os.path.relpath(file_abs, repo_path) if os.path.isabs(file_abs) else file_abs.lstrip("/")
+                repo_abs  = os.path.abspath(repo_path)
+
+                if os.path.isabs(file_abs):
+                    candidate = os.path.join(repo_abs, file_abs.lstrip("/"))
+                    if os.path.exists(candidate):
+                        # It's a repo-root-relative path — use it
+                        file_rel = os.path.relpath(candidate, repo_abs)
+                    else:
+                        # Genuinely outside repo — compute and filter
+                        file_rel = os.path.relpath(file_abs, repo_abs)
+                else:
+                    file_rel = file_abs.lstrip("/")
+
+                # Skip findings that resolve outside the repo root
+                if file_rel.startswith(".."):
+                    continue
 
                 # Line number
                 file_line_range = check.get("file_line_range", [1, 1])

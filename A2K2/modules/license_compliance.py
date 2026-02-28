@@ -105,6 +105,15 @@ UNKNOWN_LICENSE_STRINGS = {
     "license not found", "other/proprietary"
 }
 
+# Fallback license lookup for well-known packages that may not be installed locally.
+# Prevents SSPL/AGPL from hiding behind "Unresolvable Dependency" just because
+# the package isn't installed in the current environment.
+KNOWN_LICENSE_MAP = {
+    "elasticsearch":     "SSPL-1.0",
+    "elasticsearch-dsl": "SSPL-1.0",
+    "mongodb":           "SSPL-1.0",
+}
+
 
 def normalize_license(raw_license: str) -> str:
     """Normalize a raw license string to our canonical key."""
@@ -138,7 +147,6 @@ def run_pip_licenses(repo_path):
                 sys.executable, "-m", "piplicenses",
                 "--format=json",
                 "--with-system",
-                "--no-license-path",
             ],
             capture_output=True,
             text=True,
@@ -284,6 +292,28 @@ def scan(repo_path: str) -> dict:
             installed = installed_lookup.get(pkg_normalized) or installed_lookup.get(pkg_raw.lower())
 
             if not installed:
+                # Check KNOWN_LICENSE_MAP first — catches risky packages even when not installed
+                known_license = KNOWN_LICENSE_MAP.get(pkg_raw.lower())
+                if known_license and known_license in LICENSE_RISK:
+                    severity, reason = LICENSE_RISK[known_license]
+                    if severity != "low":
+                        dedup_key = (pkg_raw, source_file, known_license)
+                        if dedup_key not in seen:
+                            seen.add(dedup_key)
+                            details.append({
+                                "file":       source_file,
+                                "line":       1,
+                                "type":       f"License Risk: {known_license}",
+                                "severity":   severity,
+                                "reason":     f"'{pkg_raw}' uses {known_license} — {reason}",
+                                "confidence": "high",
+                                "snippet":    f"{pkg_raw} ({known_license})",
+                                "package":    pkg_raw,
+                                "license":    known_license,
+                                "remediation": get_remediation(pkg_raw, known_license)
+                            })
+                    continue  # skip the Unresolvable warning — license is known
+
                 # Package declared but not installed → possibly hallucinated
                 dedup_key = (pkg_raw, source_file, "Not Installed")
                 if dedup_key not in seen:
