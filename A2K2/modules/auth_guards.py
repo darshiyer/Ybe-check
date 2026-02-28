@@ -1,7 +1,7 @@
 """
 Auth Guards Detection Module — Ybe Check
 Author: Kartikeya
-Status: IN PROGRESS
+Status: COMPLETE
 
 CONTRACT:
 - Input: repo_path (string, absolute path)
@@ -27,6 +27,12 @@ SKIP_DIRS = {
     'venv', 'dist', 'build', '.next', 'out'
 }
 
+SKIP_EXTENSIONS = {
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico',
+    '.woff', '.ttf', '.eot', '.zip', '.tar', '.gz',
+    '.pyc', '.lock', '.vsix', '.db'
+}
+
 # ── ROUTE PATTERNS ───────────────────────────────────────────
 PYTHON_ROUTE_PATTERN = re.compile(
     r'@(?:app|router|blueprint)\.'
@@ -44,7 +50,7 @@ JS_ROUTE_PATTERN = re.compile(
 SENSITIVE_PATHS = {
     'admin', 'internal', 'config', 'secret', 'dashboard',
     'delete', 'reset', 'sudo', 'manage', 'panel', 'private',
-    'superuser', 'root', 'system', 'debug', 'staff'
+    'superuser', 'root', 'system', 'debug'
 }
 
 # ── AUTH PATTERNS ────────────────────────────────────────────
@@ -58,14 +64,15 @@ PYTHON_AUTH_PATTERNS = [
 
 JS_AUTH_PATTERNS = [
     'authenticate', 'authorize', 'verifyToken',
-    'requireAuth', 'passport', 'jwt.verify',
-    'isAuthenticated', 'checkAuth', 'authMiddleware',
-    'requireLogin', 'ensureAuth'
+    'requireAuth', 'passport', 'middleware',
+    'jwt.verify', 'isAuthenticated', 'checkAuth',
+    'authMiddleware', 'requireLogin', 'ensureAuth'
 ]
 
 # ── ALWAYS-FLAG PATTERNS ─────────────────────────────────────
 WILDCARD_CORS_PATTERNS = [
     re.compile(r'cors\s*\(\s*\{\s*origin\s*:\s*["\'\`]\*["\'\`]', re.IGNORECASE),
+    re.compile(r'cors\s*\(\s*\{origin\s*:\s*["\'\`]\*["\'\`]', re.IGNORECASE),
     re.compile(r'CORS\s*\(\s*origins\s*=\s*["\'\[]\s*\*', re.IGNORECASE),
     re.compile(r'allow_origins\s*=\s*\[\s*["\'\`]\*["\'\`]', re.IGNORECASE),
     re.compile(r'Access-Control-Allow-Origin\s*:\s*\*', re.IGNORECASE),
@@ -76,20 +83,23 @@ NODE_DEBUG_PATTERN = re.compile(r'NODE_ENV\s*=\s*["\']development["\']')
 
 
 def is_sensitive_path(path_str):
+    """Check if any segment in the route path is a sensitive keyword."""
     parts = path_str.lower().strip('/').split('/')
     return any(part in SENSITIVE_PATHS for part in parts)
 
 
 def walk_files(repo_path, extensions):
+    """Walk repo yielding files matching given extensions, skipping ignored dirs & binary extensions."""
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
-            if ext in extensions:
+            if ext in extensions and ext not in SKIP_EXTENSIONS:
                 yield os.path.join(root, fname)
 
 
 def read_lines(fpath):
+    """Read file lines safely. Returns empty list on failure."""
     try:
         with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
             return f.readlines()
@@ -98,146 +108,163 @@ def read_lines(fpath):
 
 
 def rel(fpath, repo_path):
+    """Return path relative to repo root."""
     return os.path.relpath(fpath, repo_path)
 
 
-def check_auth_in_window(lines, center_idx, auth_patterns, window=15):
-    """Return True if any auth pattern found near center_idx."""
-    start = max(0, center_idx - window)
-    end = min(len(lines), center_idx + window)
+def check_auth_in_window(lines, center_idx, auth_patterns, before=5, after=20):
+    """Return True if any auth pattern found in window around center_idx."""
+    start = max(0, center_idx - before)
+    end = min(len(lines), center_idx + after)
     window_text = ' '.join(lines[start:end])
-    return any(p in window_text for p in auth_patterns)
+    return any(p.lower() in window_text.lower() for p in auth_patterns)
 
 
 def scan(repo_path: str) -> dict:
-    details = []
-    seen = set()
+    try:
+        details = []
+        seen = set()
 
-    # ── SCAN PYTHON FILES ─────────────────────────────────────
-    for fpath in walk_files(repo_path, {'.py'}):
-        lines = read_lines(fpath)
-        relative = rel(fpath, repo_path)
-        full_text = ''.join(lines)
+        # ── SCAN PYTHON FILES ─────────────────────────────────
+        for fpath in walk_files(repo_path, {'.py'}):
+            lines = read_lines(fpath)
+            if not lines:
+                continue
+            relative = rel(fpath, repo_path)
+            full_text = ''.join(lines)
 
-        # TODO: Kartikeya — UNPROTECTED ROUTES (Python)
-        # YOUR CODE HERE ↓
-        for i, line in enumerate(lines):
-            match = PYTHON_ROUTE_PATTERN.search(line)
-            if match:
-                path_str = match.group(2)
-                if is_sensitive_path(path_str):
-                    has_auth = check_auth_in_window(lines, i, PYTHON_AUTH_PATTERNS)
-                    if not has_auth:
-                        key = (relative, i + 1, "Unprotected Sensitive Route")
-                        if key not in seen:
-                            seen.add(key)
-                            details.append({
-                                "file": relative,
-                                "line": i + 1,
-                                "type": "Unprotected Sensitive Route",
-                                "severity": "critical",
-                                "reason": f"Route '{path_str}' has no authentication middleware — accessible without login"
-                            })
+            # UNPROTECTED ROUTES (Python)
+            for i, line in enumerate(lines):
+                match = PYTHON_ROUTE_PATTERN.search(line)
+                if match:
+                    path_str = match.group(2)
+                    if is_sensitive_path(path_str):
+                        has_auth = check_auth_in_window(
+                            lines, i, PYTHON_AUTH_PATTERNS,
+                            before=5, after=20
+                        )
+                        if not has_auth:
+                            key = (relative, i + 1, "Unprotected Sensitive Route")
+                            if key not in seen:
+                                seen.add(key)
+                                details.append({
+                                    "file": relative,
+                                    "line": i + 1,
+                                    "type": "Unprotected Sensitive Route",
+                                    "severity": "critical",
+                                    "reason": f"Route '{path_str}' has no authentication — accessible without login"
+                                })
 
-        # TODO: Kartikeya — DEBUG MODE
-        # YOUR CODE HERE ↓
-        if DEBUG_PATTERN.search(full_text):
-            match = DEBUG_PATTERN.search(full_text)
-            line_num = full_text[:match.start()].count('\n') + 1
-            key = (relative, line_num, "Debug Mode Enabled")
-            if key not in seen:
-                seen.add(key)
-                details.append({
-                    "file": relative,
-                    "line": line_num,
-                    "type": "Debug Mode Enabled",
-                    "severity": "high",
-                    "reason": "DEBUG=True exposes stack traces and internal info in production"
-                })
-
-        # TODO: Kartikeya — WILDCARD CORS
-        # YOUR CODE HERE ↓
-        for pattern in WILDCARD_CORS_PATTERNS:
-            match = pattern.search(full_text)
-            if match:
-                line_num = full_text[:match.start()].count('\n') + 1
-                key = (relative, line_num, "Wildcard CORS")
+            # DEBUG MODE
+            for m in DEBUG_PATTERN.finditer(full_text):
+                line_num = full_text[:m.start()].count('\n') + 1
+                key = (relative, line_num, "Debug Mode Enabled")
                 if key not in seen:
                     seen.add(key)
                     details.append({
                         "file": relative,
                         "line": line_num,
-                        "type": "Wildcard CORS",
+                        "type": "Debug Mode Enabled",
                         "severity": "high",
-                        "reason": "CORS allows all origins — exposes API to requests from any website"
+                        "reason": "Debug mode enabled in code — exposes stack traces and internal info in production"
                     })
-                break
 
-    # ── SCAN JS/TS FILES ──────────────────────────────────────
-    for fpath in walk_files(repo_path, {'.js', '.ts'}):
-        lines = read_lines(fpath)
-        relative = rel(fpath, repo_path)
-        full_text = ''.join(lines)
+            # WILDCARD CORS
+            for pattern in WILDCARD_CORS_PATTERNS:
+                m = pattern.search(full_text)
+                if m:
+                    line_num = full_text[:m.start()].count('\n') + 1
+                    key = (relative, line_num, "Wildcard CORS")
+                    if key not in seen:
+                        seen.add(key)
+                        details.append({
+                            "file": relative,
+                            "line": line_num,
+                            "type": "Wildcard CORS",
+                            "severity": "high",
+                            "reason": "CORS allows all origins — exposes API to any website"
+                        })
+                    break
 
-        # TODO: Kartikeya — same as Python but for JS/TS
-        # YOUR CODE HERE ↓
-        for i, line in enumerate(lines):
-            match = JS_ROUTE_PATTERN.search(line)
-            if match:
-                path_str = match.group(2)
-                if is_sensitive_path(path_str):
-                    has_auth = check_auth_in_window(lines, i, JS_AUTH_PATTERNS)
-                    if not has_auth:
-                        key = (relative, i + 1, "Unprotected Sensitive Route")
-                        if key not in seen:
-                            seen.add(key)
-                            details.append({
-                                "file": relative,
-                                "line": i + 1,
-                                "type": "Unprotected Sensitive Route",
-                                "severity": "critical",
-                                "reason": f"Route '{path_str}' has no authentication middleware — accessible without login"
-                            })
+        # ── SCAN JS/TS FILES ──────────────────────────────────
+        for fpath in walk_files(repo_path, {'.js', '.ts'}):
+            lines = read_lines(fpath)
+            if not lines:
+                continue
+            relative = rel(fpath, repo_path)
+            full_text = ''.join(lines)
 
-        if NODE_DEBUG_PATTERN.search(full_text):
-            match = NODE_DEBUG_PATTERN.search(full_text)
-            line_num = full_text[:match.start()].count('\n') + 1
-            key = (relative, line_num, "Debug Mode Enabled")
-            if key not in seen:
-                seen.add(key)
-                details.append({
-                    "file": relative,
-                    "line": line_num,
-                    "type": "Debug Mode Enabled",
-                    "severity": "high",
-                    "reason": "NODE_ENV=development in production code"
-                })
+            # UNPROTECTED ROUTES (JS/TS)
+            for i, line in enumerate(lines):
+                match = JS_ROUTE_PATTERN.search(line)
+                if match:
+                    path_str = match.group(2)
+                    if is_sensitive_path(path_str):
+                        has_auth = check_auth_in_window(
+                            lines, i, JS_AUTH_PATTERNS,
+                            before=15, after=15
+                        )
+                        if not has_auth:
+                            key = (relative, i + 1, "Unprotected Sensitive Route")
+                            if key not in seen:
+                                seen.add(key)
+                                details.append({
+                                    "file": relative,
+                                    "line": i + 1,
+                                    "type": "Unprotected Sensitive Route",
+                                    "severity": "critical",
+                                    "reason": f"Route '{path_str}' has no authentication — accessible without login"
+                                })
 
-        for pattern in WILDCARD_CORS_PATTERNS:
-            match = pattern.search(full_text)
-            if match:
-                line_num = full_text[:match.start()].count('\n') + 1
-                key = (relative, line_num, "Wildcard CORS")
+            # NODE DEBUG
+            for m in NODE_DEBUG_PATTERN.finditer(full_text):
+                line_num = full_text[:m.start()].count('\n') + 1
+                key = (relative, line_num, "Debug Mode Enabled")
                 if key not in seen:
                     seen.add(key)
                     details.append({
                         "file": relative,
                         "line": line_num,
-                        "type": "Wildcard CORS",
+                        "type": "Debug Mode Enabled",
                         "severity": "high",
-                        "reason": "CORS allows all origins — exposes API to requests from any website"
+                        "reason": "NODE_ENV=development hardcoded — exposes stack traces and internal info in production"
                     })
-                break
 
-    # ── SCORING ──────────────────────────────────────────────
-    critical = len([d for d in details if d["severity"] == "critical"])
-    high = len([d for d in details if d["severity"] == "high"])
-    medium = len([d for d in details if d["severity"] == "medium"])
-    score = max(0, 100 - (critical * 15) - (high * 10) - (medium * 5))
+            # WILDCARD CORS (JS/TS)
+            for pattern in WILDCARD_CORS_PATTERNS:
+                m = pattern.search(full_text)
+                if m:
+                    line_num = full_text[:m.start()].count('\n') + 1
+                    key = (relative, line_num, "Wildcard CORS")
+                    if key not in seen:
+                        seen.add(key)
+                        details.append({
+                            "file": relative,
+                            "line": line_num,
+                            "type": "Wildcard CORS",
+                            "severity": "high",
+                            "reason": "CORS allows all origins — exposes API to any website"
+                        })
+                    break
 
-    return {
-        "name": NAME,
-        "score": score,
-        "issues": len(details),
-        "details": details
-    }
+        # ── SCORING ───────────────────────────────────────────
+        critical = len([d for d in details if d["severity"] == "critical"])
+        high = len([d for d in details if d["severity"] == "high"])
+        medium = len([d for d in details if d["severity"] == "medium"])
+        score = max(0, 100 - (critical * 15) - (high * 10) - (medium * 5))
+
+        return {
+            "name": NAME,
+            "score": score,
+            "issues": len(details),
+            "details": details
+        }
+
+    except Exception as e:
+        return {
+            "name": NAME,
+            "score": None,
+            "issues": 0,
+            "details": [],
+            "warning": f"Could not run: {e}"
+        }
