@@ -150,6 +150,7 @@ def scan_file(fpath, repo_path, details, seen):
                     details.append({
                         "file": rpath,
                         "line": line_no,
+                        "snippet": stripped,
                         "type": pii["type"],
                         "severity": pii["severity"],
                         "reason": pii["reason"]
@@ -164,6 +165,7 @@ def scan_file(fpath, repo_path, details, seen):
                     details.append({
                         "file": rpath,
                         "line": line_no,
+                        "snippet": stripped,
                         "type": "Unsafe Logging",
                         "severity": "high",
                         "reason": f"Full object passed to {fn_name}() — may expose PII or secrets in logs"

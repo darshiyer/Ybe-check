@@ -150,6 +150,7 @@ def scan_code_file(fpath, repo_path, details, seen):
                 details.append({
                     "file": rpath,
                     "line": line_no,
+                    "snippet": stripped,
                     "type": "Unsafe Prompt Template",
                     "severity": "critical",
                     "reason": "User input concatenated directly into prompt without sanitization — enables prompt injection"
@@ -168,6 +169,7 @@ def scan_code_file(fpath, repo_path, details, seen):
                         details.append({
                             "file": rpath,
                             "line": line_no,
+                            "snippet": stripped,
                             "type": "Missing Prompt Guardrails",
                             "severity": "high",
                             "reason": "System prompt has no refusal or boundary instructions — vulnerable to jailbreaking"
@@ -181,6 +183,7 @@ def scan_code_file(fpath, repo_path, details, seen):
                 details.append({
                     "file": rpath,
                     "line": line_no,
+                    "snippet": stripped,
                     "type": "Jailbreak Vulnerable Prompt",
                     "severity": "critical",
                     "reason": f"Prompt contains language that enables jailbreak attacks (matched: '{matched}')"
@@ -219,6 +222,7 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                     details.append({
                         "file": rpath,
                         "line": line_no,
+                        "snippet": stripped,
                         "type": "Unsafe Prompt Template",
                         "severity": "critical",
                         "reason": "User input interpolated into YAML prompt value without sanitization"
@@ -232,6 +236,7 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                 details.append({
                     "file": rpath,
                     "line": line_no,
+                    "snippet": stripped,
                     "type": "Missing Prompt Guardrails",
                     "severity": "high",
                     "reason": "System prompt in YAML has no refusal or boundary instructions — vulnerable to jailbreaking"
@@ -244,6 +249,7 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                 details.append({
                     "file": rpath,
                     "line": line_no,
+                    "snippet": stripped,
                     "type": "Jailbreak Vulnerable Prompt",
                     "severity": "critical",
                     "reason": f"YAML prompt value contains jailbreak-enabling language (matched: '{matched}')"
@@ -291,6 +297,7 @@ def scan_json_file(fpath, repo_path, details, seen):
                                 details.append({
                                     "file": rpath,
                                     "line": line_no,
+                                    "snippet": v[:120],
                                     "type": "Unsafe Prompt Template",
                                     "severity": "critical",
                                     "reason": "User input interpolated into JSON prompt value without sanitization"
@@ -305,6 +312,7 @@ def scan_json_file(fpath, repo_path, details, seen):
                             details.append({
                                 "file": rpath,
                                 "line": line_no,
+                                "snippet": v[:120],
                                 "type": "Missing Prompt Guardrails",
                                 "severity": "high",
                                 "reason": "JSON prompt value has no refusal or boundary instructions — vulnerable to jailbreaking"
@@ -317,6 +325,7 @@ def scan_json_file(fpath, repo_path, details, seen):
                             details.append({
                                 "file": rpath,
                                 "line": line_no,
+                                "snippet": v[:120],
                                 "type": "Jailbreak Vulnerable Prompt",
                                 "severity": "critical",
                                 "reason": f"JSON prompt contains jailbreak-enabling language (matched: '{matched}')"
