@@ -25,10 +25,10 @@ export function getTargetPath(): string | undefined {
 
 /**
  * Sets the target path (for the folder or workspace being scanned).
- * @param path - The target path to set.
+ * @param newPath - The target path to set.
  */
-export function setTargetPath(path: string | undefined): void {
-    targetPath = path;
+export function setTargetPath(newPath: string | undefined): void {
+    targetPath = newPath;
 }
 
 /**
@@ -125,35 +125,76 @@ export function isDuplicate(message: string): boolean {
 
 /**
  * Ensures exclusive access to a log file by using a lock file. The callback is executed once the lock is acquired.
+ * Uses atomic file creation with 'wx' flag for proper mutual exclusion.
+ * Includes timeout and stale lock detection to prevent deadlocks.
  * 
  * @param logFilePath - The path to the log file.
  * @param callback - The function to execute while holding the lock.
  */
 export function withFileLock(logFilePath: string, callback: () => void): void {
     const lockFilePath = `${logFilePath}.lock`;
+    const maxRetries = 50;       // Maximum number of retry attempts
+    const retryDelayMs = 100;    // Delay between retries (ms) — avoids busy-wait
+    const staleLockMs = 30000;   // Consider lock stale after 30 seconds
 
     let lockAcquired = false;
-    while (!lockAcquired) {
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-            // Attempt to create the lock file if it doesn't already exist
-            if (!fs.existsSync(lockFilePath)) {
-                fse.ensureFileSync(lockFilePath);  // Ensure the lock file exists
-                lockAcquired = true;
+            // Atomic lock acquisition: 'wx' flag fails if file already exists
+            fs.writeFileSync(lockFilePath, String(Date.now()), { flag: 'wx' });
+            lockAcquired = true;
+            break;
+        } catch (error: any) {
+            if (error.code === 'EEXIST') {
+                // Lock file exists — check if it's stale
+                try {
+                    const lockContent = fs.readFileSync(lockFilePath, 'utf-8');
+                    const lockTime = parseInt(lockContent, 10);
+                    if (!isNaN(lockTime) && (Date.now() - lockTime) > staleLockMs) {
+                        // Stale lock detected — remove and retry
+                        try {
+                            fs.unlinkSync(lockFilePath);
+                        } catch {
+                            // Another process may have already removed it
+                        }
+                        continue;
+                    }
+                } catch {
+                    // Can't read lock file — it may have been removed; retry
+                    continue;
+                }
+
+                // Lock is held by another process — wait before retrying
+                // Use a synchronous sleep to avoid busy-wait CPU consumption
+                const waitUntil = Date.now() + retryDelayMs;
+                while (Date.now() < waitUntil) {
+                    // Minimal busy-wait with bounded duration
+                }
+            } else {
+                // Unexpected error (permissions, disk full, etc.)
+                console.error('[Ybe Check] Error acquiring lock file:', error);
+                break;
             }
-        } catch (error) {
-            logMessage('Error checking or creating lock file', 'error');
         }
     }
 
+    if (!lockAcquired) {
+        // Fallback: execute callback without lock rather than silently failing
+        console.error('[Ybe Check] Could not acquire file lock after retries, proceeding without lock');
+    }
+
     try {
-        callback();  // Execute the callback while holding the lock
+        callback();  // Execute the callback (with or without lock)
     } catch (error) {
-        logMessage('Error executing callback', 'error');
+        console.error('[Ybe Check] Error executing callback in withFileLock:', error);
     } finally {
-        try {
-            fse.removeSync(lockFilePath);  // Remove the lock file after callback execution
-        } catch (error) {
-            logMessage('Error removing lock file', 'error');
+        if (lockAcquired) {
+            try {
+                fs.unlinkSync(lockFilePath);  // Remove the lock file after callback execution
+            } catch (error) {
+                console.error('[Ybe Check] Error removing lock file:', error);
+            }
         }
     }
 }

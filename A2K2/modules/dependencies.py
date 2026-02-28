@@ -97,6 +97,24 @@ def exists_on_pypi(package_name):
         return None
 
 
+def exists_on_npm(package_name):
+    """Return True if package exists on npm registry. Returns None on network error."""
+    try:
+        url = f"https://registry.npmjs.org/{package_name}"
+        req = urllib.request.Request(url, method='HEAD')
+        resp = urllib.request.urlopen(req, timeout=5)
+        return True
+    except urllib.error.HTTPError as e:
+        # 404 = package genuinely doesn't exist
+        if e.code == 404:
+            return False
+        # Other HTTP errors (500, 403, etc.) = can't determine
+        return None
+    except Exception:
+        # Network timeout, DNS failure, etc. = can't determine
+        return None
+
+
 def parse_requirements_txt(req_path):
     """Return list of (package_name, version_or_None, line_number)."""
     packages = []
@@ -127,15 +145,27 @@ def parse_requirements_txt(req_path):
 
 
 def parse_package_json(pkg_path):
-    """Return list of (package_name, version, line_number)."""
+    """Return list of (package_name, version, line_number) with accurate line numbers."""
     packages = []
     try:
         with open(pkg_path, 'r', encoding='utf-8', errors='ignore') as f:
-            data = json.load(f)
+            raw_lines = f.readlines()
+
+        # Parse JSON for structure
+        raw_text = ''.join(raw_lines)
+        data = json.loads(raw_text)
+
         for section in ("dependencies", "devDependencies"):
             for name, ver in data.get(section, {}).items():
                 clean_ver = re.sub(r'^[\^~>=<! ]+', '', ver)
-                packages.append((name.lower(), clean_ver, 1))
+                # Find the actual line number by searching for the package name
+                line_num = 1
+                search_key = f'"{name}"'
+                for idx, line in enumerate(raw_lines, 1):
+                    if search_key in line:
+                        line_num = idx
+                        break
+                packages.append((name.lower(), clean_ver, line_num))
     except Exception:
         pass
     return packages
@@ -191,7 +221,10 @@ def scan(repo_path: str) -> dict:
         # ── CHECK package.json ────────────────────────────────
         pkg_path = os.path.join(repo_path, 'package.json')
         if os.path.exists(pkg_path):
-            for name, version, line_num in parse_package_json(pkg_path):
+            npm_packages = parse_package_json(pkg_path)
+
+            # Check vulnerable versions
+            for name, version, line_num in npm_packages:
                 if name in NPM_VULNERABLE and version:
                     min_safe, fix_msg = NPM_VULNERABLE[name]
                     if is_vulnerable(version, min_safe):
@@ -202,6 +235,29 @@ def scan(repo_path: str) -> dict:
                             "severity": "high",
                             "reason": f"{name}=={version} is vulnerable. {fix_msg}"
                         })
+
+            # Hallucination check for npm packages — run in parallel
+            def check_npm_pkg(item):
+                name, version, line_num = item
+                result = exists_on_npm(name)
+                if result is False:
+                    return {
+                        "file": "package.json",
+                        "line": line_num,
+                        "type": "Hallucinated Package",
+                        "severity": "critical",
+                        "reason": f"'{name}' does not exist on npm — likely AI-hallucinated dependency"
+                    }
+                return None
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+                    npm_results = list(ex.map(check_npm_pkg, npm_packages))
+                for r in npm_results:
+                    if r:
+                        details.append(r)
+            except Exception:
+                pass
 
         # ── SCORING ───────────────────────────────────────────
         critical = len([d for d in details if d["severity"] == "critical"])

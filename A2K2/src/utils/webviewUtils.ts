@@ -19,7 +19,7 @@ export function showYbeCheckReport(
 }
 
 function escapeHtml(text: string): string {
-    const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    const map: Record<string, string> = { '&': '&amp;', '<': '<', '>': '>', '"': '"', "'": '&#39;' };
     return text.replace(/[&<>"']/g, (c) => map[c] || c);
 }
 
@@ -55,7 +55,7 @@ function generateReportHtml(report: any): string {
         const pct = Math.round((count / maxTypeCount) * 100);
         return `
         <div class="bar-row">
-            <div class="bar-label">${type}</div>
+            <div class="bar-label">${escapeHtml(type)}</div>
             <div class="bar-track">
                 <div class="bar-fill" style="width:${pct}%"></div>
             </div>
@@ -66,9 +66,11 @@ function generateReportHtml(report: any): string {
     const moduleCards = modules.map((mod: any, idx: number) => {
         const detailItems = (mod.details || []).slice(0, 15);
         const moreCount = (mod.details || []).length - 15;
-        const modScoreColor = mod.score >= 80 ? '#00e676' : mod.score >= 40 ? '#ffd740' : '#ff5252';
-        const statusDot = mod.score >= 80 ? 'dot-green' : mod.score >= 40 ? 'dot-yellow' : 'dot-red';
-        const modIcon = mod.score >= 80 ? '&#128274;' : mod.score >= 40 ? '&#128269;' : '&#9888;';
+        const modScore = mod.score != null ? mod.score : -1;
+        const modScoreColor = modScore >= 80 ? '#00e676' : modScore >= 40 ? '#ffd740' : '#ff5252';
+        const statusDot = modScore >= 80 ? 'dot-green' : modScore >= 40 ? 'dot-yellow' : 'dot-red';
+        const modIcon = modScore >= 80 ? '&#128274;' : modScore >= 40 ? '&#128269;' : '&#9888;';
+        const modScoreDisplay = mod.score != null ? mod.score : 'N/A';
 
         const findingsTable = detailItems.length > 0 ? `
             <div class="findings-section" id="findings-${idx}">
@@ -83,9 +85,9 @@ function generateReportHtml(report: any): string {
                     <tbody>
                         ${detailItems.map((d: any) => `
                         <tr>
-                            <td class="cell-file">${d.file || 'unknown'}</td>
+                            <td class="cell-file">${escapeHtml(d.file || 'unknown')}</td>
                             <td class="cell-line">${d.line || '-'}</td>
-                            <td class="cell-type">${d.type || d.reason || 'secret'}</td>
+                            <td class="cell-type">${escapeHtml(d.type || d.reason || 'secret')}</td>
                         </tr>`).join('')}
                     </tbody>
                 </table>
@@ -99,7 +101,7 @@ function generateReportHtml(report: any): string {
                 <div class="module-left">
                     <span class="module-icon">${modIcon}</span>
                     <div>
-                        <div class="module-name">${mod.name.charAt(0).toUpperCase() + mod.name.slice(1)}</div>
+                        <div class="module-name">${escapeHtml(mod.name.charAt(0).toUpperCase() + mod.name.slice(1))}</div>
                         <div class="module-issues">
                             <span class="${statusDot}"></span>
                             ${mod.issues} issue${mod.issues !== 1 ? 's' : ''} detected
@@ -108,12 +110,12 @@ function generateReportHtml(report: any): string {
                 </div>
                 <div class="module-right">
                     <div class="module-score-ring" style="border-color:${modScoreColor}; color:${modScoreColor}">
-                        ${mod.score}
+                        ${modScoreDisplay}
                     </div>
                 </div>
             </div>
-            ${mod.warning ? `<div class="module-alert alert-warn">${mod.warning}</div>` : ''}
-            ${mod.error ? `<div class="module-alert alert-err">${mod.error}</div>` : ''}
+            ${mod.warning ? `<div class="module-alert alert-warn">${escapeHtml(String(mod.warning))}</div>` : ''}
+            ${mod.error ? `<div class="module-alert alert-err">${escapeHtml(String(mod.error))}</div>` : ''}
             ${detailItems.length > 0 ? `
                 <button class="toggle-btn" onclick="document.getElementById('findings-${idx}').classList.toggle('open')">
                     Show Findings &#9660;
@@ -516,7 +518,7 @@ function generateReportHtml(report: any): string {
                 </div>
                 <div class="verdict">
                     <span class="verdict-icon">${scoreIcon}</span>
-                    ${report.verdict || scoreLabel}
+                    ${escapeHtml(report.verdict || scoreLabel)}
                 </div>
                 <div class="stats-row">
                     <div class="stat-chip"><strong>${modules.length}</strong> module${modules.length !== 1 ? 's' : ''} scanned</div>
@@ -546,16 +548,10 @@ function generateReportHtml(report: any): string {
             ${moduleCards}
 
             <div class="footer">
-                Ybe Check v0.1.0 &bull; Security audit for vibe-coded applications
+                Ybe Check v0.5.0 &bull; Security audit for vibe-coded applications
             </div>
         </div>
     </body>
     </html>
     `;
-}
-
-function getScoreClass(score: number): string {
-    if (score >= 80) return 'score-high';
-    if (score >= 40) return 'score-med';
-    return 'score-low';
 }

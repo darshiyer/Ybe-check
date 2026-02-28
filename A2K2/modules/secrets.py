@@ -84,8 +84,9 @@ def _ensure_detect_secrets() -> bool:
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
     try:
+        # Use --user flag to avoid modifying the global Python environment
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "detect-secrets", "-q"],
+            [sys.executable, "-m", "pip", "install", "--user", "detect-secrets", "-q"],
             check=True,
             capture_output=True,
         )

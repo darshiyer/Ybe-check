@@ -8,8 +8,11 @@ import * as path from 'path';
 import { logMessage, createSeparatorLogLine } from './loggingUtils';
 import { setTargetPath } from './fileUtils';
 import { updateStatusBarMessage } from './statusBarUtils';
+import { showYbeCheckReport } from './webviewUtils';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+
+export type ScanType = 'full' | 'static';
 
 const execAsync = promisify(exec);
 let isScanning = false;
@@ -32,9 +35,11 @@ async function checkPythonAvailable(pythonPath: string): Promise<boolean> {
 
 /**
  * Executes a Ybe Check scan using the bundled cli.py.
+ * @param scanType - The type of scan to run: 'full' (Static + Dynamic) or 'static' (Static only).
+ * @param context - The VS Code extension context.
  */
 export async function executeScan(
-    _unused: any,
+    scanType: ScanType,
     context: vscode.ExtensionContext
 ) {
     if (isScanning) {
@@ -68,12 +73,14 @@ export async function executeScan(
         title: "Ybe Check",
         cancellable: false
     }, async (progress) => {
-        progress.report({ message: "Installing dependencies & scanning (this may take a moment)..." });
+        const scanLabel = scanType === 'full' ? 'Full Audit' : 'Static Scan';
+        progress.report({ message: `Running ${scanLabel} (this may take a moment)...` });
 
         try {
             const cliPath = path.join(context.extensionPath, 'cli.py');
+            const modeFlag = scanType === 'static' ? '--static' : '';
             const { stdout, stderr } = await execAsync(
-                `"${pythonPath}" "${cliPath}" "${targetPath}" --json`,
+                `"${pythonPath}" "${cliPath}" "${targetPath}" --json ${modeFlag}`.trim(),
                 { maxBuffer: MAX_BUFFER }
             );
 
@@ -83,13 +90,12 @@ export async function executeScan(
 
             const report = JSON.parse(stdout);
 
-            logMessage(createSeparatorLogLine(`Ybe Check completed: Score ${report.overall_score}/100`), 'info');
+            logMessage(createSeparatorLogLine(`Ybe Check ${scanLabel} completed: Score ${report.overall_score}/100`), 'info');
 
             const score = report.overall_score != null ? report.overall_score : 0;
             updateStatusBarMessage(`$(shield) Ybe Check: ${score}/100`);
 
-            const { showYbeCheckReport } = require('./webviewUtils');
-            await showYbeCheckReport(report, context);
+            showYbeCheckReport(report, context);
 
         } catch (error) {
             logMessage(`Error during Ybe Check: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');

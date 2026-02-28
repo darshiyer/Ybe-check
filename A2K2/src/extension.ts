@@ -20,12 +20,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register a command that starts the full scan (Static + Dynamic)
     const fullScanCommand = vscode.commands.registerCommand('ybe-check.fullScan', async () => {
-        await executeScan(null, context);
+        await executeScan('full', context);
     });
 
     // Register a command for Static Scan only
     const staticScanCommand = vscode.commands.registerCommand('ybe-check.staticScan', async () => {
-        await executeScan(null, context);
+        await executeScan('static', context);
     });
 
     // Add commands to subscriptions

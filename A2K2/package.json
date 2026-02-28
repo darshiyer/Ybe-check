@@ -2,7 +2,7 @@
     "name": "ybe-check",
     "displayName": "Ybe Check",
     "description": "Production-readiness gatekeeper for vibe-coded apps",
-    "version": "0.1.2",
+    "version": "0.5.0",
     "publisher": "YbeCheck",
     "engines": {
         "vscode": "^1.74.0"

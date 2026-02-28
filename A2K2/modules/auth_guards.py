@@ -76,6 +76,10 @@ WILDCARD_CORS_PATTERNS = [
     re.compile(r'CORS\s*\(\s*origins\s*=\s*["\'\[]\s*\*', re.IGNORECASE),
     re.compile(r'allow_origins\s*=\s*\[\s*["\'\`]\*["\'\`]', re.IGNORECASE),
     re.compile(r'Access-Control-Allow-Origin\s*:\s*\*', re.IGNORECASE),
+    # Simple variable assignment patterns: CORS_ORIGIN = "*" or cors_origin = '*'
+    re.compile(r'(?:CORS|cors)[_-]?(?:ORIGIN|origin|ORIGINS|origins)\s*=\s*["\'\`]\*["\'\`]'),
+    # ALLOWED_ORIGINS = ["*"] or allowed_origins = ['*']
+    re.compile(r'(?:ALLOWED|allowed)[_-]?(?:ORIGINS|origins|HOSTS|hosts)\s*=\s*\[\s*["\'\`]\*["\'\`]'),
 ]
 
 DEBUG_PATTERN = re.compile(r'\bDEBUG\s*=\s*True\b')

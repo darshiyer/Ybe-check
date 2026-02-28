@@ -36,12 +36,13 @@ export function logMessage(message: string | { lineNumber: number, patternName: 
         const stats = fs.existsSync(logFilePath) ? fs.statSync(logFilePath) : { size: 0 };
         if (stats.size > maxLogSize) {
             // Archive the current log file by renaming it with the current timestamp
-            const timestamp = new Date().toISOString().replace(/:/g, '-');
-            const archivedLogFilePath = path.join(path.dirname(logFilePath), `secrets-${timestamp}.log`);
+            const archiveTimestamp = new Date().toISOString().replace(/:/g, '-');
+            const archivedLogFilePath = path.join(path.dirname(logFilePath), `ybe-check-${archiveTimestamp}.log`);
             try {
                 fs.renameSync(logFilePath, archivedLogFilePath); // Rotate the log file
-            } catch (error) {
-                logMessage('Error rotating log file', 'error');
+            } catch (rotateError) {
+                // Use console.error to avoid infinite recursion (logMessage calling itself)
+                console.error('[Ybe Check] Error rotating log file:', rotateError);
             }
         }
 
@@ -53,7 +54,8 @@ export function logMessage(message: string | { lineNumber: number, patternName: 
             });
         }
     } catch (error) {
-        logMessage('Error handling log file:', 'error');
+        // Use console.error to avoid infinite recursion (logMessage calling itself)
+        console.error('[Ybe Check] Error handling log file:', error);
     }
 }
 
