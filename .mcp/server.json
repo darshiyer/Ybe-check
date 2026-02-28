@@ -1,0 +1,91 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.AddyCuber/ybe-check",
+  "title": "Ybe Check",
+  "description": "Ybe Check – security and compliance orchestrator for AI-generated repositories.",
+  "repository": {
+    "url": "https://github.com/AddyCuber/A2K2-PS1",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "ybe-check",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "name": "ybe.scan_repo",
+      "description": "Scan a repository for security and production-readiness issues. Runs all enabled modules (secrets, prompt injection, PII, dependencies, auth guards, IaC, SBOM, etc.) and returns a unified JSON report with findings, scores, and a verdict.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute or relative path to the repository root."
+          },
+          "modules": {
+            "type": "array",
+            "items": { "type": "string" },
+            "nullable": true,
+            "description": "Optional subset of module names to run (e.g. [\"secrets\", \"dependencies\"]). Omit to run all."
+          },
+          "categories": {
+            "type": "array",
+            "items": { "type": "string" },
+            "nullable": true,
+            "description": "Optional subset of categories: static, dynamic, infra. Omit to run all."
+          }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "ybe.list_findings",
+      "description": "List findings from a previous or fresh scan, optionally filtered by severity or category. Loads ybe-report.json from the repo path when available; otherwise runs a new scan.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the repository (or directory containing a ybe-report.json)."
+          },
+          "severity": {
+            "type": "string",
+            "nullable": true,
+            "description": "Filter by severity: info, low, medium, high, critical."
+          },
+          "category": {
+            "type": "string",
+            "nullable": true,
+            "description": "Filter by category: static, dynamic, infra."
+          }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "ybe.get_remediation",
+      "description": "Get remediation guidance for a specific finding by ID. Returns the finding's ai_analysis block when present, or a minimal impact/remediation template otherwise.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the repository."
+          },
+          "finding_id": {
+            "type": "string",
+            "description": "The finding ID (e.g. \"secrets:0\", \"deps:3\")."
+          }
+        },
+        "required": ["path", "finding_id"]
+      }
+    }
+  ]
+}

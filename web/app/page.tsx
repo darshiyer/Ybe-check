@@ -225,7 +225,7 @@ export default function Home() {
         <p>
           License: Apache-2.0 ·{" "}
           <a
-            href="https://github.com/darshiyer/A2K2-PS1"
+            href="https://github.com/AddyCuber/A2K2-PS1"
             target="_blank"
             rel="noopener noreferrer"
             className="text-blue-400 hover:underline"

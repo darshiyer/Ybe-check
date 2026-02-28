@@ -91,7 +91,7 @@ We're excited to have you join the project! Follow these steps to contribute:
 - **Stay Synced with the Original Repository**:  
    If the original repository has updates (especially when working on a long-lived branch), you may want to keep your fork up-to-date. You can add the original repository as a remote (called `upstream`) and pull in changes:
    ```bash
-   git remote add upstream https://github.com/darshiyer/A2K2.git
+   git remote add upstream https://github.com/AddyCuber/A2K2.git
    git fetch upstream
    git merge upstream/main
    ```

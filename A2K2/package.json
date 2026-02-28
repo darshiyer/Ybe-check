@@ -10,7 +10,7 @@
     "main": "./out/extension.js",
     "repository": {
         "type": "git",
-        "url": "https://github.com/darshiyer/A2K2"
+        "url": "https://github.com/AddyCuber/A2K2"
     },
     "activationEvents": [
         "onStartupFinished"

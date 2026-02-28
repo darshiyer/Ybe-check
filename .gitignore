@@ -6,3 +6,8 @@ out/
 *.vsix
 __pycache__/
 .ybe-check/
+dist/
+*.egg-info/
+.mcpregistry_github_token
+.mcpregistry_registry_token
+ybe-report.json

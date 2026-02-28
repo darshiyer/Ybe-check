@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ybe-check": {
+      "command": "/Users/adityaray/.pyenv/shims/python3",
+      "args": ["-m", "ybe_check.mcp_server"],
+      "env": {}
+    }
+  }
+}
