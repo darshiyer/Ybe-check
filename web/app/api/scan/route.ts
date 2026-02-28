@@ -48,6 +48,13 @@ export async function POST(request: NextRequest) {
 
     if (mode === "dynamic") {
       // DYNAMIC MODE: Validate as website URL, skip clone
+      const isGithub = /github\.com\//.test(rawUrl) || (!rawUrl.startsWith("http") && rawUrl.includes("/"));
+      if (isGithub) {
+        return NextResponse.json(
+          { error: "Dynamic analysis requires a live website URL (e.g., https://example.com), not a GitHub repository link." },
+          { status: 400 }
+        );
+      }
       if (!rawUrl.startsWith("http")) {
         return NextResponse.json(
           { error: "Dynamic analysis requires a valid website URL (starting with http:// or https://)" },
@@ -57,7 +64,15 @@ export async function POST(request: NextRequest) {
       env.YBECK_TARGET_URL = rawUrl;
       cliArgs += " --dynamic";
     } else {
-      // STATIC MODE: Clone repository
+      // STATIC MODE
+      const isWebsite = rawUrl.startsWith("http") && !/github\.com\//.test(rawUrl);
+      if (isWebsite) {
+        return NextResponse.json(
+          { error: "Static analysis requires a GitHub repository, not a live website URL. Please use Dynamic mode for websites." },
+          { status: 400 }
+        );
+      }
+      // Clone repository
       const repoUrl = normalizeGitUrl(rawUrl);
       execSync(`git clone --depth 1 ${repoUrl} "${tempDir}"`, {
         stdio: "pipe",

@@ -60,8 +60,17 @@ type TopFix = {
 };
 
 type Report = {
+  tool: string;
+  version: string;
+  repo: string;
+  scanned_at: string;
   overall_score: number;
   verdict: string;
+  verdict_thresholds: {
+    production_ready: number;
+    needs_attention: number;
+    not_ready: number;
+  };
   summary: {
     total_issues: number;
     critical: number;
@@ -99,7 +108,8 @@ function generatePDF(report: Report, mode: "static" | "dynamic", url: string) {
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  doc.text(`Generated on ${new Date().toLocaleString()}`, 20, 32);
+  doc.text(`Generated on ${report.scanned_at ? new Date(report.scanned_at).toLocaleString() : new Date().toLocaleString()}`, 20, 32);
+  doc.text(`Tool: ${report.tool || "Ybe Check"} v${report.version || "1.0"}`, 150, 32);
 
   // Target Info
   doc.setTextColor(33, 33, 33);
@@ -249,8 +259,10 @@ function ModuleIcon({ name, size = 20, color = "#8B949E" }: { name: string; size
       return <svg viewBox="0 0 24 24" {...s}><path d="M18 11V6a2 2 0 00-2-2v0a2 2 0 00-2 2v0" /><path d="M14 10V4a2 2 0 00-2-2v0a2 2 0 00-2 2v2" /><path d="M10 10.5V6a2 2 0 00-2-2v0a2 2 0 00-2 2v8" /><path d="M18 8a2 2 0 114 0v6a8 8 0 01-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 012.83-2.82L7 15" /></svg>;
     case "Config & Env":
       return <svg viewBox="0 0 24 24" {...s}><path d="M12 20a8 8 0 100-16 8 8 0 000 16z" /><path d="M12 14a2 2 0 100-4 2 2 0 000 4z" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="M20 12h2" /><path d="M2 12h2" /></svg>;
+    case "Trophy":
+      return <svg viewBox="0 0 24 24" {...s}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 22V18" /><path d="M14 22V18" /><path d="M12 18a7 7 0 0 0 7-7V4H5v7a7 7 0 0 0 7 7z" /></svg>;
     default:
-      return <svg viewBox="0 0 24 24" {...s}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>;
+      return <svg viewBox="0 0 24 24" {...s}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>;
   }
 }
 
@@ -304,6 +316,7 @@ export default function Home() {
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [phase, setPhase] = useState(0);
   const [transitioning, setTransitioning] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<"static" | "dynamic">("static");
 
   const phases = scanMode === "static" ? STATIC_PHASES : DYNAMIC_PHASES;
@@ -316,8 +329,20 @@ export default function Home() {
 
   const onScan = useCallback(async (mode: "static" | "dynamic", target: string) => {
     const u = target.trim();
-    if (!u) { setError(mode === "static" ? "Enter a GitHub repo URL" : "Enter a Website URL"); return; }
-    setError(null); setReport(null); setActiveModule(null); setLoading(true); setScanMode(mode);
+    if (!u) { setToast(mode === "static" ? "Enter a GitHub repo URL" : "Enter a Website URL"); return; }
+
+    // Cross-mode validation
+    const isGithub = /github\.com\//.test(u) || (!u.startsWith("http") && u.includes("/"));
+    if (mode === "dynamic" && isGithub) {
+      setToast("Dynamic scan requires a live website URL. Please use Static mode for GitHub repositories.");
+      return;
+    }
+    if (mode === "static" && !isGithub && u.startsWith("http")) {
+      setToast("Static scan requires a GitHub repository. Please use Dynamic mode for website URLs.");
+      return;
+    }
+
+    setUrl(u); setError(null); setReport(null); setActiveModule(null); setLoading(true); setScanMode(mode);
     try {
       const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, mode }) });
       const d = await r.json();
@@ -367,6 +392,9 @@ export default function Home() {
           <LandingView onScan={onScan} error={error} hideBg />
         )}
       </div>
+
+      {/* TOAST NOTIFICATION */}
+      {toast && <Toast message={toast} onClear={() => setToast(null)} />}
     </div>
   );
 }
@@ -521,7 +549,10 @@ function DashboardView({ report, onModuleClick, onHome, mode, url }: { report: R
               background: "radial-gradient(ellipse at 30% 80%, rgba(120,80,220,0.35), transparent 60%), radial-gradient(ellipse at 70% 20%, rgba(40,180,200,0.25), transparent 50%)",
             }} />
             <div style={{ position: "relative", zIndex: 1, padding: "32px 36px", display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%" }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.55)", marginBottom: 8 }}>{isStatic ? "Audit Report" : "Dynamic Audit"}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.55)" }}>{isStatic ? "Audit Report" : "Dynamic Audit"}</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", padding: "2px 8px", borderRadius: 4 }}>v{report.version}</div>
+              </div>
               <div style={{ fontSize: 96, fontWeight: 900, lineHeight: 1, color: "#fff", letterSpacing: "-3px", fontVariantNumeric: "tabular-nums" }}>{animated}</div>
               <div style={{
                 marginTop: 20, padding: "10px 20px",
@@ -534,8 +565,15 @@ function DashboardView({ report, onModuleClick, onHome, mode, url }: { report: R
                   score >= 80 ? "Website security is robust. Baseline scans look clean." : score >= 50 ? "Runtime issues detected. Review attack surface findings." : "Website under threat. Critical vulnerabilities detected."
                 )}
               </div>
-              <div style={{ marginTop: 12, fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}>
-                Target: {isStatic ? url.replace(/https?:\/\/github\.com\//, "") : url}
+              <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}>
+                  Target: {isStatic ? url.replace(/https?:\/\/github\.com\//, "") : url}
+                </div>
+                {report.scanned_at && (
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontStyle: "italic" }}>
+                    {new Date(report.scanned_at).toLocaleTimeString()}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -544,9 +582,11 @@ function DashboardView({ report, onModuleClick, onHome, mode, url }: { report: R
           <div style={mCard({ display: "flex", flexDirection: "column", justifyContent: "space-between" })}>
             <div style={{ fontSize: 12, fontWeight: 600, color: M.dim, textTransform: "uppercase", letterSpacing: 1.5 }}>TOTAL ISSUES FOUND</div>
             <div style={{ fontSize: 72, fontWeight: 900, lineHeight: 1, color: totalIssues > 0 ? "#a78bfa" : T.green, fontVariantNumeric: "tabular-nums", marginTop: 16 }}>{animIssues}</div>
-            {highCount > 0 && (
-              <div style={{ marginTop: "auto", paddingTop: 16 }}>
-                <span style={{ display: "inline-block", padding: "5px 14px", borderRadius: 8, background: "rgba(248,81,73,0.12)", color: T.red, fontSize: 13, fontWeight: 600 }}>{highCount} critical</span>
+            {totalIssues > 0 && (
+              <div style={{ marginTop: "auto", display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {report.summary.critical + report.summary.high > 0 && <span style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(248,81,73,0.12)", color: T.red, fontSize: 11, fontWeight: 600 }}>{report.summary.critical + report.summary.high} critical</span>}
+                {report.summary.medium > 0 && <span style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(219,109,40,0.12)", color: T.orange, fontSize: 11, fontWeight: 600 }}>{report.summary.medium} medium</span>}
+                {report.summary.low > 0 && <span style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(88,166,255,0.12)", color: T.blue, fontSize: 11, fontWeight: 600 }}>{report.summary.low} low</span>}
               </div>
             )}
           </div>
@@ -555,7 +595,7 @@ function DashboardView({ report, onModuleClick, onHome, mode, url }: { report: R
           <div style={mCard({ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", background: "#f5f5f5" })}>
             <span style={{ display: "inline-block", padding: "5px 16px", borderRadius: 20, background: M.bg, color: "#fff", fontSize: 12, fontWeight: 700 }}>Security Profile</span>
             <div style={{ width: 56, height: 56, borderRadius: 50, background: M.bg, display: "flex", alignItems: "center", justifyContent: "center", margin: "16px 0 12px" }}>
-              <ModuleIcon name="Auth Guards" size={28} color="#fff" />
+              <ModuleIcon name={score >= 80 ? "Trophy" : "Shield"} size={28} color="#fff" />
             </div>
             <div style={{ fontSize: 11, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: 1 }}>YOU ARE A</div>
             <div style={{ fontSize: 26, fontWeight: 800, color: "#111", lineHeight: 1.15, margin: "6px 0 8px" }}>
@@ -625,12 +665,12 @@ function DashboardView({ report, onModuleClick, onHome, mode, url }: { report: R
             <div style={{ fontSize: 12, fontWeight: 600, color: M.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>SCAN SUMMARY</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
               <div style={{ padding: "14px 16px", borderRadius: 12, background: M.cardLt }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontVariantNumeric: "tabular-nums" }}>{animModules}</div>
-                <div style={{ fontSize: 11, color: M.dim, marginTop: 2 }}>Modules</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: T.text, fontVariantNumeric: "tabular-nums" }}>{report.summary.modules_passed}/{animModules}</div>
+                <div style={{ fontSize: 11, color: M.dim, marginTop: 2 }}>Passed</div>
               </div>
               <div style={{ padding: "14px 16px", borderRadius: 12, background: M.cardLt }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontVariantNumeric: "tabular-nums" }}>{passCount}</div>
-                <div style={{ fontSize: 11, color: M.dim, marginTop: 2 }}>Passing</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: report.summary.modules_failed > 0 ? T.red : T.green, fontVariantNumeric: "tabular-nums" }}>{report.summary.modules_failed}</div>
+                <div style={{ fontSize: 11, color: M.dim, marginTop: 2 }}>Errors/Failures</div>
               </div>
             </div>
             {report.top_fixes && report.top_fixes.length > 0 && (
@@ -809,6 +849,34 @@ function IssueGroup({ label, color, issues }: { label: string; color: string; is
 }
 
 
+
+/* ─── TOAST COMPONENT ────────────────────────────────────── */
+
+function Toast({ message, onClear }: { message: string; onClear: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClear, 4000);
+    return () => clearTimeout(timer);
+  }, [onClear]);
+
+  return (
+    <div style={{
+      position: "fixed", bottom: 40, left: "50%", transform: "translateX(-50%)",
+      background: "rgba(224, 64, 64, 0.95)", color: "#fff",
+      padding: "14px 28px", borderRadius: 100, backdropFilter: "blur(20px)",
+      WebkitBackdropFilter: "blur(20px)",
+      boxShadow: "0 20px 40px rgba(0,0,0,0.5)", zIndex: 2000,
+      display: "flex", alignItems: "center", gap: 12,
+      border: "1px solid rgba(255,255,255,0.2)",
+      animation: "toastIn 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28) both",
+      cursor: "pointer"
+    }} onClick={onClear}>
+      <span style={{ fontSize: 18 }}>⚠️</span>
+      <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: -0.2 }}>{message}</span>
+    </div>
+  );
+}
+
+
 /* ─── REUSABLE ───────────────────────────────────────────── */
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -874,6 +942,10 @@ if (typeof document !== "undefined") {
     @keyframes dashboardReveal {
       0% { opacity: 0; transform: translateY(20px); filter: blur(10px); }
       100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+    }
+    @keyframes toastIn {
+      0% { opacity: 0; transform: translate(-50%, 20px); }
+      100% { opacity: 1; transform: translate(-50%, 0); }
     }
   `;
   document.head.appendChild(style);
