@@ -1,0 +1,8 @@
+{
+  "name": "fake-vibe-app",
+  "version": "0.1.0",
+  "dependencies": {
+    "express": "4.17.1",
+    "some-hallucinated-npm-package": "0.1.0"
+  }
+}

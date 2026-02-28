@@ -1,0 +1,10 @@
+.git
+.gitignore
+src/**
+tests/**
+__mocks__/**
+tsconfig.json
+**/*.ts
+!out/**
+node_modules/.package-lock.json
+!cli.py

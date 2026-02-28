@@ -1,0 +1,66 @@
+{
+    "name": "ybe-check",
+    "displayName": "Ybe Check",
+    "description": "Production-readiness gatekeeper for vibe-coded apps",
+    "version": "0.1.2",
+    "publisher": "YbeCheck",
+    "engines": {
+        "vscode": "^1.74.0"
+    },
+    "main": "./out/extension.js",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/darshiyer/A2K2"
+    },
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "ybe-check.fullScan",
+                "title": "Ybe Check: Full Audit (Static + Dynamic)",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.staticScan",
+                "title": "Ybe Check: Static Scan",
+                "category": "Ybe Check"
+            }
+        ],
+        "configuration": {
+            "title": "Ybe Check",
+            "properties": {
+                "ybe-check.pythonPath": {
+                    "type": "string",
+                    "default": "python3",
+                    "description": "Path to the Python executable."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "npm run compile",
+        "package": "vsce package",
+        "publish": "vsce publish"
+    },
+    "devDependencies": {
+        "@types/fs-extra": "^11.0.4",
+        "@types/node": "16.x",
+        "@types/vscode": "^1.74.0",
+        "@typescript-eslint/eslint-plugin": "^5.45.0",
+        "@typescript-eslint/parser": "^5.45.0",
+        "@vscode/test-electron": "^2.2.0",
+        "@vscode/vsce": "^3.2.1",
+        "eslint": "^8.28.0",
+        "typescript": "^4.9.3"
+    },
+    "license": "Apache-2.0",
+    "dependencies": {
+        "fs-extra": "^11.3.3"
+    }
+}

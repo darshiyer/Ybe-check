@@ -1,0 +1,4 @@
+# Deliberately insecure settings for testing
+OPENAI_API_KEY = "sk-FAKE_OPENAI_KEY_1234567890"
+AWS_ACCESS_KEY_ID = "AKIAFAKEACCESSKEY"
+AWS_SECRET_ACCESS_KEY = "fakeAwsSecret123"
