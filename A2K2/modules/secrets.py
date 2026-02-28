@@ -240,12 +240,16 @@ def _run_keyword_scan(repo_path: str) -> List[Dict]:
                     key = f"{rel_path}:{line_num}:{pattern_name}"
                     if key not in seen:
                         seen.add(key)
+                        reason = (
+                            f"{pattern_name} found in {rel_path}:{line_num}. "
+                            "Remove from source code — store in environment variable or secrets manager."
+                        )
                         details.append({
                             "file": rel_path,
                             "line": line_num,
                             "type": pattern_name,
                             "severity": severity,
-                            "reason": "Move this hardcoded secret to an environment variable and add it to .env.example",
+                            "reason": reason,
                         })
             for match in ASSIGNMENT_PATTERN.finditer(line):
                 key = f"{rel_path}:{line_num}:Hardcoded Secret"

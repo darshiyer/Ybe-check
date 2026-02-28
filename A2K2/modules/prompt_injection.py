@@ -52,8 +52,24 @@ JAILBREAK_PHRASES = [
     'you have no restrictions',
 ]
 
-# --- YAML/JSON keys that likely contain prompts ---
-PROMPT_KEYS = {'system', 'prompt', 'instruction', 'template', 'system_prompt', 'message'}
+# --- Prompt-like keys in YAML/JSON that reliably indicate LLM prompts ---
+# Narrowed to avoid false-positives on generic YAML config files.
+# 'system' and 'template' alone are too broad — they appear everywhere.
+PROMPT_KEYS = {'system_prompt', 'prompt', 'instruction', 'system_message'}
+
+# Strong LLM-context keys: if any of these appear in the SAME file,
+# it's much safer to trust that 'prompt'/'template' etc. are LLM-related.
+LLM_CONTEXT_KEYS = {
+    'model', 'temperature', 'max_tokens', 'top_p', 'stop', 'messages',
+    'llm', 'openai', 'anthropic', 'gemini', 'completion', 'embedding'
+}
+
+# File/directory path fragments that indicate non-LLM config — skip these files
+NON_LLM_YAML_PATH_FRAGMENTS = {
+    'crypto-config', 'cryptoconfig', 'network/', 'docker-compose',
+    'kubernetes', 'k8s/', 'helm/', 'ci/', '.github/', 'ansible',
+    'terraform', 'configmap', 'values.yaml', 'chart.yaml',
+}
 
 
 def walk_files(repo_path, extensions):
@@ -231,17 +247,40 @@ def scan_code_file(fpath, repo_path, details, seen):
     return prompt_var_found
 
 
+def _file_likely_llm(fpath: str) -> bool:
+    """Return False if the file path strongly suggests it is NOT an LLM config."""
+    lower = fpath.replace('\\', '/').lower()
+    for fragment in NON_LLM_YAML_PATH_FRAGMENTS:
+        if fragment in lower:
+            return False
+    return True
+
+
+def _file_has_llm_context(lines: list) -> bool:
+    """Return True if any LLM-specific keys exist anywhere in the file."""
+    combined = ' '.join(lines).lower()
+    return any(kw in combined for kw in LLM_CONTEXT_KEYS)
+
+
 def scan_yaml_file(fpath, repo_path, details, seen):
     """Scan .yaml / .yml files for prompt keys."""
+    # Skip files that are clearly not LLM configs
+    rel_fpath = os.path.relpath(fpath, repo_path).replace('\\', '/')
+    if not _file_likely_llm(rel_fpath):
+        return False
+
     lines = read_file(fpath)
     rpath = rel(fpath, repo_path)
     prompt_found = False
+
+    # Only flag 'Missing Prompt Guardrails' in YAML if the file also contains
+    # LLM-specific context keywords — avoids false positives on infra configs.
+    has_llm_ctx = _file_has_llm_context(lines)
 
     for i, line in enumerate(lines):
         stripped = line.strip()
         line_no = i + 1
 
-        # Look for keys like: system_prompt: "..." or prompt: |
         key_match = re.match(r'^([a-zA-Z_]+)\s*:\s*(.*)', stripped)
         if not key_match:
             continue
@@ -254,7 +293,7 @@ def scan_yaml_file(fpath, repo_path, details, seen):
 
         prompt_found = True
 
-        # Detector A on value
+        # Detector A: user input interpolated into prompt value
         for uvar in USER_INPUT_VARS:
             if '{' + uvar + '}' in value or '{' + uvar + ' ' in value:
                 if not already_flagged(seen, rpath, line_no):
@@ -268,8 +307,8 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                         "reason": "User input interpolated into YAML prompt value without sanitization"
                     })
 
-        # Detector B on value + surrounding lines
-        if not has_guardrails(lines, i, window=10):
+        # Detector B: Missing guardrails — only if strong LLM context present
+        if has_llm_ctx and not has_guardrails(lines, i, window=10):
             flag_key = (rpath, line_no, 'guardrail')
             if flag_key not in seen:
                 seen.add(flag_key)
@@ -283,7 +322,7 @@ def scan_yaml_file(fpath, repo_path, details, seen):
                     "reason": "System prompt in YAML has no refusal or boundary instructions — vulnerable to jailbreaking"
                 })
 
-        # Detector C on value
+        # Detector C: Jailbreak phrases in value
         matched = check_jailbreak(value)
         if matched:
             if not already_flagged(seen, rpath, line_no):

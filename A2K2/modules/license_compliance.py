@@ -208,21 +208,62 @@ def parse_requirements_txt(fpath):
 
 
 def parse_package_json(fpath):
-    """Extract package names from package.json."""
+    """
+    Extract package names from package.json with their line numbers.
+    Returns list of (package_name, line_number) tuples.
+    """
     packages = []
     try:
         with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-            data = json.load(f)
-        for section in ['dependencies', 'devDependencies', 'peerDependencies']:
-            packages.extend(data.get(section, {}).keys())
-    except:
+            lines = f.readlines()
+
+        in_dep_section = False
+        dep_section_keys = {'"dependencies"', '"devDependencies"', '"peerDependencies"'}
+
+        for lineno, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            # Check if we just entered a dependency section
+            for key in dep_section_keys:
+                if stripped.startswith(key):
+                    in_dep_section = True
+            # End of section
+            if in_dep_section and stripped == '}':
+                in_dep_section = False
+            # Parse package lines inside a dep section: "package-name": "version"
+            if in_dep_section:
+                import re
+                m = re.match(r'^\s*"([^"@][^"]+)"\s*:', stripped)
+                if m:
+                    packages.append((m.group(1).lower(), lineno))
+    except Exception:
         pass
-    return [p.lower() for p in packages]
+    return packages
+
+
+def parse_requirements_txt_with_lines(fpath):
+    """Extract package names with their line numbers from requirements.txt."""
+    packages = []
+    try:
+        with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+            for lineno, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line or line.startswith('#') or line.startswith('-'):
+                    continue
+                import re
+                match = re.match(r'^([A-Za-z0-9_\-\.]+)', line)
+                if match:
+                    packages.append((match.group(1).lower(), lineno))
+    except Exception:
+        pass
+    return packages
 
 
 def get_declared_packages(repo_path):
-    """Get all packages declared in dependency files with their source file."""
-    declared = {}  # package_name_lower → source_file
+    """
+    Get all packages declared in dependency files with their source file and line number.
+    Returns: declared dict {package_name_lower: (source_file, line_number)}, dep_files list
+    """
+    declared = {}  # package_name_lower → (rel_path, line_number)
     dep_files = find_dependency_files(repo_path)
 
     for fpath in dep_files:
@@ -230,15 +271,15 @@ def get_declared_packages(repo_path):
         rel_path = os.path.relpath(fpath, repo_path)
 
         if fname == 'requirements.txt' or fname.startswith('requirements'):
-            pkgs = parse_requirements_txt(fpath)
+            pkgs = parse_requirements_txt_with_lines(fpath)
         elif fname == 'package.json':
             pkgs = parse_package_json(fpath)
         else:
             continue
 
-        for pkg in pkgs:
+        for pkg, lineno in pkgs:
             if pkg not in declared:
-                declared[pkg] = rel_path
+                declared[pkg] = (rel_path, lineno)
 
     return declared, dep_files
 
@@ -285,7 +326,7 @@ def scan(repo_path: str) -> dict:
         seen = set()
 
         # Check every declared package
-        for pkg_raw, source_file in declared_packages.items():
+        for pkg_raw, (source_file, pkg_line) in declared_packages.items():
             pkg_normalized = pkg_raw.lower().replace("-", "_").replace(".", "_")
 
             # Find in installed packages
@@ -302,7 +343,7 @@ def scan(repo_path: str) -> dict:
                             seen.add(dedup_key)
                             details.append({
                                 "file":       source_file,
-                                "line":       1,
+                                "line":       pkg_line,
                                 "type":       f"License Risk: {known_license}",
                                 "severity":   severity,
                                 "reason":     f"'{pkg_raw}' uses {known_license} — {reason}",
