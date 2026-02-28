@@ -1,0 +1,11 @@
+# A2K2 Python scanner — runtime dependencies
+# Install with: pip install -r requirements.txt
+
+# IaC Security module (iac_security.py)
+checkov>=3.0.0
+
+# License Compliance module (license_compliance.py)
+pip-licenses>=4.0.0
+
+# Dependencies module (dependencies.py)
+pip-audit>=2.0.0
