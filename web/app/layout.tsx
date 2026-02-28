@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ybe Check — Security audit for vibe-coded apps",
-  description: "Production-readiness gatekeeper for AI-generated repos. Scans for secrets, prompt injection, PII, dependencies, and auth guards. 0–100 score with Go/No-Go verdict.",
+  title: "Ybe Check — Production Readiness Audit for AI-Generated Code",
+  description: "Enterprise-grade security scanner for vibe-coded repositories. Detects secrets, prompt injection, PII leaks, vulnerable dependencies, and auth gaps. Get a 0–100 production readiness score.",
 };
 
 export default function RootLayout({
