@@ -3,4 +3,5 @@ out/
 .vscode/
 .ybe-check/
 *.vsix
-.DS_Store__pycache__/
+.DS_Store
+__pycache__/

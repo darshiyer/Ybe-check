@@ -22,7 +22,16 @@ ALL_MODULES = [
     "modules.iac_security",
     "modules.license_compliance",
     "modules.ai_traceability",
-    "modules.test_coverage"
+    "modules.test_coverage",
+    # Container & supply chain
+    "modules.container_scan",
+    "modules.sbom",
+    "modules.config_env",
+    # Dynamic modules — require a running target (set YBECK_TARGET_URL)
+    "modules.load_testing",
+    "modules.web_attacks",
+    "modules.api_fuzzing",
+    "modules.prompt_live",
 ]
 
 # Static-only modules (no network calls, no dynamic analysis)
