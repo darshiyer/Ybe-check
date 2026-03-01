@@ -224,6 +224,37 @@ function useCountUp(target: number, ms = 1200) {
 
 /* ─── SVG ICONS ──────────────────────────────────────────── */
 
+function YbeLogo({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Circle */}
+      <path
+        d="M50 5C25.15 5 5 25.15 5 50s20.15 45 45 45 45-20.15 45-45S74.85 5 50 5z"
+        stroke="#fff"
+        strokeWidth="9"
+        fill="none"
+      />
+      {/* Y letter merged with checkmark */}
+      <path
+        d="M30 30 L45 52 L45 72"
+        stroke="#fff"
+        strokeWidth="10"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <path
+        d="M45 52 L75 12"
+        stroke="#fff"
+        strokeWidth="10"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
 function ModuleIcon({ name, size = 20, color = "#8B949E" }: { name: string; size?: number; color?: string }) {
   const s = { width: size, height: size, fill: "none", stroke: color, strokeWidth: 1.5, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (name) {
@@ -318,6 +349,8 @@ export default function Home() {
   const [transitioning, setTransitioning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<"static" | "dynamic">("static");
+  const [showExtPopup, setShowExtPopup] = useState(false);
+  const hasVisitedDashboard = useRef(false);
 
   const phases = scanMode === "static" ? STATIC_PHASES : DYNAMIC_PHASES;
 
@@ -353,7 +386,18 @@ export default function Home() {
     finally { setLoading(false); }
   }, []);
 
-  const reset = () => { setReport(null); setActiveModule(null); };
+  const reset = () => {
+    setReport(null);
+    setActiveModule(null);
+    if (hasVisitedDashboard.current) {
+      setTimeout(() => setShowExtPopup(true), 600);
+    }
+  };
+
+  // Track when the user enters a dashboard view
+  useEffect(() => {
+    if (report) hasVisitedDashboard.current = true;
+  }, [report]);
 
   const showBackground = !report && !activeModule;
 
@@ -395,9 +439,231 @@ export default function Home() {
 
       {/* TOAST NOTIFICATION */}
       {toast && <Toast message={toast} onClear={() => setToast(null)} />}
+
+      {/* MATRIX EXTENSION POPUP */}
+      {showExtPopup && <MatrixExtensionPopup onClose={() => setShowExtPopup(false)} />}
     </div>
   );
 }
+
+/* ─── DOWNLOAD EXTENSION BUTTON ──────────────────────────── */
+
+function DownloadExtensionButton({ size = "large" }: { size?: "large" | "small" }) {
+  const isLarge = size === "large";
+  return (
+    <a
+      href="vscode:extension/YbeCheck.ybe-check"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: isLarge ? 10 : 7,
+        padding: isLarge ? "12px 26px" : "8px 16px",
+        borderRadius: 50,
+        background: "linear-gradient(135deg, rgba(255,255,255,0.12), rgba(200,190,255,0.08))",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        border: "1px solid rgba(255,255,255,0.35)",
+        color: "#fff",
+        fontSize: isLarge ? 14 : 12,
+        fontWeight: 800,
+        textDecoration: "none",
+        transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+        whiteSpace: "nowrap" as const,
+        animation: "downloadPulse 2.5s ease-in-out infinite",
+        letterSpacing: isLarge ? 0.5 : 0.2,
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = "linear-gradient(135deg, rgba(255,255,255,0.22), rgba(200,190,255,0.18))";
+        e.currentTarget.style.borderColor = "rgba(255,255,255,0.6)";
+        e.currentTarget.style.transform = "scale(1.06)";
+        e.currentTarget.style.color = "#fff";
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = "linear-gradient(135deg, rgba(255,255,255,0.12), rgba(200,190,255,0.08))";
+        e.currentTarget.style.borderColor = "rgba(255,255,255,0.35)";
+        e.currentTarget.style.transform = "scale(1)";
+        e.currentTarget.style.color = "#fff";
+      }}
+    >
+      <svg width={isLarge ? 18 : 14} height={isLarge ? 18 : 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      {isLarge ? "Download VS Code Extension" : "Get Extension"}
+    </a>
+  );
+}
+
+
+/* ─── MATRIX EXTENSION POPUP ─────────────────────────────── */
+
+function MatrixExtensionPopup({ onClose }: { onClose: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    canvas.width = 480;
+    canvas.height = 340;
+
+    const chars = "01アイウエオカキクケコYBECHECK▓▒░";
+    const fontSize = 12;
+    const cols = Math.floor(canvas.width / fontSize);
+    const drops: number[] = Array(cols).fill(1);
+
+    const draw = () => {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.06)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#0f0";
+      ctx.font = `${fontSize}px monospace`;
+
+      for (let i = 0; i < drops.length; i++) {
+        const char = chars[Math.floor(Math.random() * chars.length)];
+        const x = i * fontSize;
+        const y = drops[i] * fontSize;
+
+        ctx.fillStyle = Math.random() > 0.95 ? "#fff" : `rgba(0, ${150 + Math.random() * 105}, 0, ${0.6 + Math.random() * 0.4})`;
+        ctx.fillText(char, x, y);
+
+        if (y > canvas.height && Math.random() > 0.975) drops[i] = 0;
+        drops[i]++;
+      }
+    };
+
+    const interval = setInterval(draw, 45);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        background: "rgba(0,0,0,0.75)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        animation: "popupOverlay 0.3s ease-out",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          position: "relative",
+          width: 480,
+          borderRadius: 16,
+          overflow: "hidden",
+          border: "1px solid rgba(0,255,0,0.25)",
+          boxShadow: "0 0 40px rgba(0,255,0,0.15), 0 25px 60px rgba(0,0,0,0.6)",
+          animation: "popupSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
+      >
+        {/* Matrix canvas background */}
+        <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.35 }} />
+
+        {/* Content overlay */}
+        <div style={{ position: "relative", zIndex: 1, padding: "36px 32px", background: "rgba(0,8,0,0.85)" }}>
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            style={{
+              position: "absolute", top: 12, right: 12,
+              background: "rgba(255,255,255,0.05)", border: "1px solid rgba(0,255,0,0.2)",
+              color: "#0f0", width: 30, height: 30, borderRadius: 8,
+              cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "monospace",
+            }}
+          >×</button>
+
+          {/* Terminal header */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#ff5f57" }} />
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#febc2e" }} />
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#28c840" }} />
+          </div>
+
+          {/* Glitch text header */}
+          <div style={{ fontFamily: "monospace", fontSize: 11, color: "rgba(0,255,0,0.5)", marginBottom: 6, letterSpacing: 2 }}>
+            {'>'} SYSTEM.INTERCEPT
+          </div>
+          <div style={{
+            fontFamily: "monospace",
+            fontSize: 22,
+            fontWeight: 900,
+            color: "#0f0",
+            textShadow: "0 0 10px rgba(0,255,0,0.5), 0 0 20px rgba(0,255,0,0.2)",
+            marginBottom: 8,
+            animation: "glitchFlicker 3s ease-in-out infinite",
+          }}>
+            SECURE YOUR STACK
+          </div>
+
+          <div style={{ fontFamily: "monospace", fontSize: 13, color: "rgba(0,255,0,0.7)", lineHeight: 1.7, marginBottom: 24 }}>
+            <span style={{ color: "rgba(0,255,0,0.4)" }}>$</span> ybe-check detected <span style={{ color: "#fff", fontWeight: 700 }}>244 vulnerabilities</span><br/>
+            <span style={{ color: "rgba(0,255,0,0.4)" }}>$</span> Install the VS Code extension for<br/>
+            <span style={{ color: "rgba(0,255,0,0.4)" }}>{'  '}</span> real-time <span style={{ color: "#3FB950" }}>security scanning</span> as you code
+            <span style={{ animation: "terminalBlink 1s step-end infinite" }}>▌</span>
+          </div>
+
+          {/* CTA Button */}
+          <a
+            href="vscode:extension/YbeCheck.ybe-check"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              width: "100%",
+              padding: "14px 28px",
+              borderRadius: 10,
+              background: "linear-gradient(135deg, #238636, #2ea043)",
+              border: "1px solid rgba(63,185,80,0.5)",
+              color: "#fff",
+              fontSize: 15,
+              fontWeight: 800,
+              fontFamily: "monospace",
+              textDecoration: "none",
+              textTransform: "uppercase" as const,
+              letterSpacing: 1.5,
+              cursor: "pointer",
+              transition: "all 0.3s ease",
+              boxShadow: "0 0 20px rgba(63,185,80,0.3), inset 0 1px 0 rgba(255,255,255,0.1)",
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = "linear-gradient(135deg, #2ea043, #3FB950)";
+              e.currentTarget.style.boxShadow = "0 0 30px rgba(63,185,80,0.5), inset 0 1px 0 rgba(255,255,255,0.15)";
+              e.currentTarget.style.transform = "translateY(-2px)";
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = "linear-gradient(135deg, #238636, #2ea043)";
+              e.currentTarget.style.boxShadow = "0 0 20px rgba(63,185,80,0.3), inset 0 1px 0 rgba(255,255,255,0.1)";
+              e.currentTarget.style.transform = "translateY(0)";
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Install Extension
+          </a>
+
+          {/* Skip */}
+          <button
+            onClick={onClose}
+            style={{
+              display: "block", width: "100%", marginTop: 12,
+              background: "none", border: "none",
+              color: "rgba(0,255,0,0.35)", fontSize: 11, fontFamily: "monospace",
+              cursor: "pointer", padding: 8, letterSpacing: 1,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = "rgba(0,255,0,0.6)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "rgba(0,255,0,0.35)"; }}
+          >
+            [ SKIP — CONTINUE WITHOUT EXTENSION ]
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /* ═══════════════════════════════════════════════════════════════
    LANDING
@@ -414,11 +680,15 @@ function LandingView({ onScan, error, hideBg }: { onScan: (mode: "static" | "dyn
           <LetterGlitch glitchColors={["#2b4539", "#61dca3", "#61b3dc"]} glitchSpeed={50} centerVignette outerVignette={false} smooth />
         </div>
       )}
-      <nav style={{ position: "relative", zIndex: 10, display: "flex", justifyContent: "center", padding: "16px 24px" }}>
+      <nav style={{ position: "relative", zIndex: 10, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px" }}>
+        <div style={{ width: 220 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 32, padding: "10px 28px", borderRadius: 50, background: "rgba(15,20,25,0.75)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.08)" }}>
-          <span style={{ fontWeight: 700, fontSize: 16, color: "#fff" }}>Ybe Check</span>
-          <a href="#" style={{ fontSize: 14, color: T.text2, textDecoration: "none" }}>Dynamic Mode v1.2</a>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <YbeLogo size={28} />
+            <span style={{ fontWeight: 700, fontSize: 16, color: "#fff" }}>Ybe Check</span>
+          </div>
         </div>
+        <DownloadExtensionButton size="large" />
       </nav>
       <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "calc(100vh - 72px)", padding: "40px 24px", textAlign: "center" }}>
         <h1 style={{ fontSize: "clamp(36px, 5vw, 64px)", fontWeight: 800, lineHeight: 1.1, maxWidth: 850, letterSpacing: "-0.03em", marginBottom: 16 }}>
@@ -883,8 +1153,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ minHeight: "100vh", color: T.text }}>
       <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", borderBottom: `1px solid ${M.border}` }}>
-        <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>Ybe Check</span>
-        <a href="https://github.com/darshiyer/A2K2-PS1" target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: M.dim, textDecoration: "none" }}>GitHub ↗</a>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <YbeLogo size={22} />
+          <span style={{ fontWeight: 700, fontSize: 15, color: T.text }}>Ybe Check</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <DownloadExtensionButton size="small" />
+          <a href="https://github.com/darshiyer/A2K2-PS1" target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: M.dim, textDecoration: "none" }}>GitHub ↗</a>
+        </div>
       </nav>
       {children}
     </div>
