@@ -18,9 +18,10 @@ export function showYbeCheckReport(
     panel.webview.html = generateReportHtml(report);
 }
 
-function escapeHtml(text: string): string {
+function escapeHtml(text: any): string {
     const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return text.replace(/[&<>"']/g, (c) => map[c] || c);
+    const str = String(text || '');
+    return str.replace(/[&<>"']/g, (c) => map[c] || c);
 }
 
 function generateReportHtml(report: any): string {
@@ -105,7 +106,7 @@ function generateReportHtml(report: any): string {
                 <div class="module-left">
                     <span class="${statusDot}"></span>
                     <div>
-                        <div class="module-name">${escapeHtml(mod.name.charAt(0).toUpperCase() + mod.name.slice(1))}</div>
+                        <div class="module-name">${escapeHtml(String(mod.name || '').charAt(0).toUpperCase() + String(mod.name || '').slice(1))}</div>
                         <div class="module-issues">${mod.issues} issue${mod.issues !== 1 ? 's' : ''}</div>
                     </div>
                 </div>
@@ -225,7 +226,7 @@ function generateReportHtml(report: any): string {
             ${topFixes.length > 0 ? `
             <div class="section" style="animation-delay:.1s">
                 <div class="section-label">Priority Fixes</div>
-                ${topFixes.map((fix: string) => `<div class="fix-item">${escapeHtml(fix)}</div>`).join('')}
+                ${topFixes.map((fix: any) => `<div class="fix-item">${escapeHtml(String(fix || ''))}</div>`).join('')}
             </div>
             ` : ''}
 
