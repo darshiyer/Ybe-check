@@ -2,7 +2,7 @@
     "name": "ybe-check",
     "displayName": "Ybe Check",
     "description": "Production-readiness gatekeeper for vibe-coded apps",
-    "version": "0.21.0",
+    "version": "0.22.0",
     "publisher": "YbeCheck",
     "engines": {
         "vscode": "^1.99.0"
@@ -26,6 +26,21 @@
                 "command": "ybe-check.staticScan",
                 "title": "Ybe Check: Static Scan",
                 "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.askCopilot",
+                "title": "Ybe Check: Ask Copilot (with Security Context)",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.fixWithCopilot",
+                "title": "Ybe Check: Fix Finding with Copilot",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.securityAudit",
+                "title": "Ybe Check: Security Audit with Copilot",
+                "category": "Ybe Check"
             }
         ],
         "configuration": {
@@ -42,7 +57,7 @@
             "ybe-check": {
                 "command": "${config:ybe-check.pythonPath}",
                 "args": ["-m", "ybe_check.mcp_server"],
-                "description": "Ybe Check – security and compliance scanner for AI-generated repos. Tools: ybe.scan_repo, ybe.list_findings, ybe.get_remediation."
+                "description": "Ybe Check – security scanner with prompt engineering for AI assistants. Tools: ybe.scan_repo, ybe.list_findings, ybe.get_remediation, ybe.get_security_context, ybe.enhance_prompt, ybe.get_fix_prompt, ybe.get_review_prompt. Prompts: security-audit, fix-critical, review-file."
             }
         }
     },

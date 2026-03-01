@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 /**
  * Displays the Ybe Check production readiness report in a WebView.
+ * Wires up message passing so "Fix with Copilot" buttons trigger extension commands.
  */
 export function showYbeCheckReport(
     report: any,
@@ -16,6 +17,17 @@ export function showYbeCheckReport(
 
     panel.reveal();
     panel.webview.html = generateReportHtml(report);
+
+    // Listen for messages from the webview (Fix with Copilot, Ask Copilot, etc.)
+    panel.webview.onDidReceiveMessage(async (msg) => {
+        if (msg.command === 'fixWithCopilot' && msg.finding) {
+            await vscode.commands.executeCommand('ybe-check.fixWithCopilot', msg.finding);
+        } else if (msg.command === 'askCopilot') {
+            await vscode.commands.executeCommand('ybe-check.askCopilot');
+        } else if (msg.command === 'securityAudit') {
+            await vscode.commands.executeCommand('ybe-check.securityAudit');
+        }
+    }, undefined, context.subscriptions);
 }
 
 function escapeHtml(text: any): string {
@@ -29,6 +41,7 @@ function generateReportHtml(report: any): string {
     const modules = report.module_results || report.modules || [];
     const totalIssues = modules.reduce((sum: number, m: any) => sum + (m.issues || 0), 0);
     const topFixes: string[] = report.top_fixes || [];
+    const allFindings: any[] = report.findings || [];
 
     const scoreColor = score >= 80 ? '#10b981' : score >= 40 ? '#eab308' : '#f43f5e';
     const scoreGlow = score >= 80
@@ -85,15 +98,28 @@ function generateReportHtml(report: any): string {
         const findingsTable = detailItems.length > 0 ? `
             <div class="findings-section" id="findings-${idx}">
                 <table class="findings-table">
-                    <thead><tr><th>File</th><th>Line</th><th>Type</th><th>Severity</th></tr></thead>
+                    <thead><tr><th>File</th><th>Line</th><th>Type</th><th>Severity</th><th>Fix</th></tr></thead>
                     <tbody>
-                        ${detailItems.map((d: any) => `
+                        ${detailItems.map((d: any, di: number) => {
+                            // Try to match this detail to a unified finding for the Fix button
+                            const matchId = `finding-${idx}-${di}`;
+                            const findingData = JSON.stringify({
+                                id: d.id || `${mod.name}:${di}`,
+                                type: d.type || d.reason || 'issue',
+                                severity: d.severity || 'medium',
+                                summary: d.reason || d.type || 'Security issue',
+                                location: { path: d.file || 'unknown', line: d.line || null },
+                                evidence: d.snippet ? { snippet: d.snippet } : null,
+                            }).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                            return `
                         <tr>
                             <td class="cell-file">${escapeHtml(d.file || 'unknown')}</td>
                             <td class="cell-line">${d.line || '-'}</td>
                             <td class="cell-type">${escapeHtml(d.type || d.reason || 'issue')}</td>
                             <td><span class="sev-badge" style="background:${sevColor(d.severity)}20;color:${sevColor(d.severity)}">${escapeHtml((d.severity || 'medium').toUpperCase())}</span></td>
-                        </tr>`).join('')}
+                            <td><button class="fix-btn" onclick="fixFinding(&quot;${matchId}&quot;)" data-finding="${findingData}" id="${matchId}">Fix ⚡</button></td>
+                        </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
                 ${moreCount > 0 ? `<div class="findings-more">+ ${moreCount} more findings</div>` : ''}
@@ -201,6 +227,17 @@ function generateReportHtml(report: any): string {
             .cta-bar p{font-size:12px;color:#666}
             .cta-bar code{background:rgba(124,106,239,.1);padding:2px 8px;border-radius:4px;font-size:11px;color:var(--accent)}
 
+            .fix-btn{background:rgba(124,106,239,.12);border:1px solid rgba(124,106,239,.25);color:var(--accent);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-weight:700;transition:all .15s;white-space:nowrap}
+            .fix-btn:hover{background:rgba(124,106,239,.25);border-color:var(--accent);transform:scale(1.05)}
+
+            .copilot-bar{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:16px;margin-bottom:8px;animation:fadeIn .5s ease-out .2s both}
+            .copilot-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border-radius:10px;border:1px solid rgba(124,106,239,.2);cursor:pointer;font-size:13px;font-weight:700;transition:all .2s;letter-spacing:.3px}
+            .copilot-btn:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(124,106,239,.15)}
+            .copilot-primary{background:linear-gradient(135deg,#7c6aef,#a78bfa);color:#fff;border-color:transparent}
+            .copilot-primary:hover{background:linear-gradient(135deg,#6d5ce0,#9b7bf0)}
+            .copilot-secondary{background:rgba(124,106,239,.08);color:var(--accent)}
+            .copilot-secondary:hover{background:rgba(124,106,239,.16)}
+
             .footer{text-align:center;margin-top:32px;padding-top:16px;border-top:1px solid rgba(255,255,255,.03);color:#333;font-size:10px;letter-spacing:.5px}
         </style>
     </head>
@@ -240,12 +277,65 @@ function generateReportHtml(report: any): string {
             <div class="section-label" style="margin-top:8px;margin-bottom:12px;font-size:10px;text-transform:uppercase;letter-spacing:3px;color:#7c6aef;font-weight:700">Module Results</div>
             ${moduleCards}
 
+            <div class="copilot-bar">
+                <button class="copilot-btn copilot-primary" onclick="securityAudit()">⚡ Security Audit with Copilot</button>
+                <button class="copilot-btn copilot-secondary" onclick="askCopilot()">💬 Ask Copilot</button>
+                <button class="copilot-btn copilot-secondary" onclick="fixTopIssue()">🔧 Fix Top Issue</button>
+            </div>
+
             <div class="cta-bar">
                 <p>For detailed AI analysis and chat, run <code>ybe-check dashboard</code></p>
             </div>
 
             <div class="footer">Ybe Check &bull; Security audit for vibe-coded applications</div>
         </div>
+
+        <script>
+            const vscode = acquireVsCodeApi();
+
+            // Pre-embed all findings as JSON for the fix buttons
+            const allFindings = ${JSON.stringify(allFindings.slice(0, 50).map((f: any) => ({
+                id: f.id, type: f.type, severity: f.severity,
+                summary: (f.summary || '').slice(0, 200),
+                location: f.location || {},
+                evidence: f.evidence || null,
+                ai_analysis: f.ai_analysis || null,
+            })))};
+
+            function fixFinding(btnId) {
+                const btn = document.getElementById(btnId);
+                if (!btn) return;
+                try {
+                    const raw = btn.getAttribute('data-finding');
+                    const finding = JSON.parse(raw.replace(/&quot;/g, '"'));
+                    vscode.postMessage({ command: 'fixWithCopilot', finding: finding });
+                    btn.textContent = 'Sent ✓';
+                    btn.style.background = 'rgba(16,185,129,.15)';
+                    btn.style.color = '#10b981';
+                    btn.style.borderColor = '#10b981';
+                    setTimeout(() => { btn.textContent = 'Fix ⚡'; btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = ''; }, 2000);
+                } catch(e) {
+                    console.error('Fix button error:', e);
+                }
+            }
+
+            function fixTopIssue() {
+                if (allFindings.length > 0) {
+                    // Pick the highest severity finding
+                    const sevOrder = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
+                    const sorted = [...allFindings].sort((a, b) => (sevOrder[b.severity] || 0) - (sevOrder[a.severity] || 0));
+                    vscode.postMessage({ command: 'fixWithCopilot', finding: sorted[0] });
+                }
+            }
+
+            function askCopilot() {
+                vscode.postMessage({ command: 'askCopilot' });
+            }
+
+            function securityAudit() {
+                vscode.postMessage({ command: 'securityAudit' });
+            }
+        </script>
     </body>
     </html>
     `;
