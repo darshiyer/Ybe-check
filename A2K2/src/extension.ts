@@ -12,6 +12,24 @@ import * as path from 'path';
 const MCP_SERVER_ID = 'ybe-check';
 const MCP_ARGS = ['-m', 'ybe_check.mcp_server'];
 
+function writeMcpFile(dir: string, mcpFilePath: string, pythonPath: string): boolean {
+    let config: { mcpServers: Record<string, unknown> } = { mcpServers: {} };
+    if (fs.existsSync(mcpFilePath)) {
+        try { config = JSON.parse(fs.readFileSync(mcpFilePath, 'utf8')); }
+        catch { config = { mcpServers: {} }; }
+    }
+    if (!config.mcpServers) { config.mcpServers = {}; }
+
+    const existing = config.mcpServers[MCP_SERVER_ID] as { command?: string; args?: string[] } | undefined;
+    if (existing && existing.command === pythonPath) { return false; }
+
+    config.mcpServers[MCP_SERVER_ID] = { command: pythonPath, args: MCP_ARGS };
+
+    if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+    fs.writeFileSync(mcpFilePath, JSON.stringify(config, null, 2));
+    return true;
+}
+
 function ensureMcpConfig(context: vscode.ExtensionContext) {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) { return; }
@@ -20,31 +38,25 @@ function ensureMcpConfig(context: vscode.ExtensionContext) {
         .getConfiguration('ybe-check')
         .get('pythonPath', 'python3');
 
-    const cursorDir = path.join(workspaceFolders[0].uri.fsPath, '.cursor');
-    const mcpFile = path.join(cursorDir, 'mcp.json');
+    const root = workspaceFolders[0].uri.fsPath;
+    let changed = false;
 
-    let config: { mcpServers: Record<string, unknown> } = { mcpServers: {} };
-    if (fs.existsSync(mcpFile)) {
-        try { config = JSON.parse(fs.readFileSync(mcpFile, 'utf8')); }
-        catch { config = { mcpServers: {} }; }
+    // Write .vscode/mcp.json (VS Code native MCP support)
+    const vscodeDir = path.join(root, '.vscode');
+    changed = writeMcpFile(vscodeDir, path.join(vscodeDir, 'mcp.json'), pythonPath) || changed;
+
+    // Write .cursor/mcp.json (Cursor support)
+    const cursorDir = path.join(root, '.cursor');
+    changed = writeMcpFile(cursorDir, path.join(cursorDir, 'mcp.json'), pythonPath) || changed;
+
+    if (changed) {
+        vscode.window.showInformationMessage(
+            'Ybe Check: MCP server registered for VS Code & Cursor. Reload the window to activate it.',
+            'Reload'
+        ).then(action => {
+            if (action === 'Reload') { vscode.commands.executeCommand('workbench.action.reloadWindow'); }
+        });
     }
-    if (!config.mcpServers) { config.mcpServers = {}; }
-
-    // Skip if already registered with the same settings
-    const existing = config.mcpServers[MCP_SERVER_ID] as { command?: string; args?: string[] } | undefined;
-    if (existing && existing.command === pythonPath) { return; }
-
-    config.mcpServers[MCP_SERVER_ID] = { command: pythonPath, args: MCP_ARGS };
-
-    if (!fs.existsSync(cursorDir)) { fs.mkdirSync(cursorDir, { recursive: true }); }
-    fs.writeFileSync(mcpFile, JSON.stringify(config, null, 2));
-
-    vscode.window.showInformationMessage(
-        'Ybe Check: MCP server registered in .cursor/mcp.json. Reload the window to activate it.',
-        'Reload'
-    ).then(action => {
-        if (action === 'Reload') { vscode.commands.executeCommand('workbench.action.reloadWindow'); }
-    });
 }
 
 /**

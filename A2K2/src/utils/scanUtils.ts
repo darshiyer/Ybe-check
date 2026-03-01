@@ -5,6 +5,8 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
 import { logMessage, createSeparatorLogLine } from './loggingUtils';
 import { setTargetPath } from './fileUtils';
 import { updateStatusBarMessage } from './statusBarUtils';
@@ -34,7 +36,7 @@ async function checkPythonAvailable(pythonPath: string): Promise<boolean> {
 }
 
 /**
- * Executes a Ybe Check scan using the bundled cli.py.
+ * Executes a Ybe Check scan using `python3 -m ybe_check.cli scan`.
  * @param scanType - The type of scan to run: 'full' (Static + Dynamic) or 'static' (Static only).
  * @param context - The VS Code extension context.
  */
@@ -76,19 +78,22 @@ export async function executeScan(
         const scanLabel = scanType === 'full' ? 'Full Audit' : 'Static Scan';
         progress.report({ message: `Running ${scanLabel} (this may take a moment)...` });
 
+        // Write report to a temp file so we get clean JSON (no log noise)
+        const tmpReport = path.join(os.tmpdir(), `ybe-report-${Date.now()}.json`);
+
         try {
-            const cliPath = path.join(context.extensionPath, 'cli.py');
-            const modeFlag = scanType === 'static' ? '--static' : '';
-            const { stdout, stderr } = await execAsync(
-                `"${pythonPath}" "${cliPath}" "${targetPath}" --json ${modeFlag}`.trim(),
-                { maxBuffer: MAX_BUFFER }
-            );
+            const categoryFlag = scanType === 'static' ? '--categories static' : '';
+            const cmd = [
+                `"${pythonPath}"`, '-m', 'ybe_check.cli', 'scan',
+                `"${targetPath}"`,
+                '--output', `"${tmpReport}"`,
+                categoryFlag,
+            ].filter(Boolean).join(' ');
 
-            if (stderr && !stdout) {
-                throw new Error(stderr);
-            }
+            await execAsync(cmd, { maxBuffer: MAX_BUFFER });
 
-            const report = JSON.parse(stdout);
+            const reportJson = fs.readFileSync(tmpReport, 'utf8');
+            const report = JSON.parse(reportJson);
 
             logMessage(createSeparatorLogLine(`Ybe Check ${scanLabel} completed: Score ${report.overall_score}/100`), 'info');
 
@@ -101,6 +106,8 @@ export async function executeScan(
             logMessage(`Error during Ybe Check: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
             vscode.window.showErrorMessage(`Ybe Check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
+            // Clean up temp file
+            try { fs.unlinkSync(tmpReport); } catch { /* ignore */ }
             isScanning = false;
         }
     });

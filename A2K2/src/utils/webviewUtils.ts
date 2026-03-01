@@ -26,7 +26,7 @@ function escapeHtml(text: any): string {
 
 function generateReportHtml(report: any): string {
     const score = report.overall_score || 0;
-    const modules = report.modules || [];
+    const modules = report.module_results || report.modules || [];
     const totalIssues = modules.reduce((sum: number, m: any) => sum + (m.issues || 0), 0);
     const topFixes: string[] = report.top_fixes || [];
 

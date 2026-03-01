@@ -4,6 +4,7 @@ Ybe Check CLI — typer-based interface.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import webbrowser
@@ -142,7 +143,7 @@ def report(
 @app.command()
 def setup(
     skip_extension: bool = typer.Option(False, "--skip-extension", help="Skip VS Code/Cursor extension install"),
-    custom_keys: bool = typer.Option(False, "--custom-keys", help="Provide your own API keys instead of the built-in ones"),
+    custom_keys: bool = typer.Option(False, "--custom-keys", help="Provide your own API keys"),
 ) -> None:
     """One-time setup: install extension, register MCP. AI works out of the box."""
     typer.echo(f"Ybe Check v{__version__} — Setup\n")
@@ -155,21 +156,33 @@ def setup(
     if custom_keys:
         _collect_api_keys()
     else:
-        typer.echo("[ai] Using built-in AI key — no configuration needed.")
+        typer.echo("[ai] No API keys configured — AI falls back to static remediation until keys are added.")
 
     typer.echo("\nSetup complete. Reload your Cursor/VS Code window to activate the MCP server.")
 
 
+def _version_key_from_vsix(path: Path) -> tuple[int, ...]:
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", path.name)
+    if not m:
+        return (0, 0, 0)
+    return tuple(int(part) for part in m.groups())
+
+
+def _select_vsix(vsix_files: list[Path]) -> Path:
+    # Prefer latest modified artifact (typical release flow), tie-break by semantic version.
+    return max(vsix_files, key=lambda p: (p.stat().st_mtime, _version_key_from_vsix(p)))
+
+
 def _install_extension() -> None:
     assets_dir = Path(__file__).parent / "assets"
-    vsix_files = sorted(assets_dir.glob("ybe-check-*.vsix")) if assets_dir.exists() else []
+    vsix_files = list(assets_dir.glob("ybe-check-*.vsix")) if assets_dir.exists() else []
 
     if not vsix_files:
         typer.echo("[extension] No bundled .vsix found — skipping extension install.")
         typer.echo("           Install manually: cursor --install-extension <path-to-vsix>")
         return
 
-    vsix = vsix_files[-1]
+    vsix = _select_vsix(vsix_files)
     ide_cmd = None
     for cmd in ("cursor", "code"):
         if shutil.which(cmd):
@@ -195,32 +208,40 @@ def _install_extension() -> None:
 
 
 def _write_mcp_config() -> None:
-    cursor_dir = Path.cwd() / ".cursor"
-    mcp_file = cursor_dir / "mcp.json"
-
-    config: dict = {"mcpServers": {}}
-    if mcp_file.exists():
-        try:
-            config = json.loads(mcp_file.read_text("utf-8"))
-        except (json.JSONDecodeError, OSError):
-            config = {"mcpServers": {}}
-    if "mcpServers" not in config:
-        config["mcpServers"] = {}
-
+    """Write MCP server config to both .vscode/mcp.json and .cursor/mcp.json."""
     python_cmd = "python3"
-    existing = config["mcpServers"].get("ybe-check")
-    if existing and existing.get("command") == python_cmd:
-        typer.echo("[mcp] .cursor/mcp.json already configured — skipping.")
-        return
-
-    config["mcpServers"]["ybe-check"] = {
+    mcp_entry = {
         "command": python_cmd,
         "args": ["-m", "ybe_check.mcp_server"],
     }
 
-    cursor_dir.mkdir(parents=True, exist_ok=True)
-    mcp_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    typer.echo("[mcp] Wrote MCP server config to .cursor/mcp.json")
+    targets = [
+        (Path.cwd() / ".vscode", "VS Code"),
+        (Path.cwd() / ".cursor", "Cursor"),
+    ]
+
+    for target_dir, label in targets:
+        mcp_file = target_dir / "mcp.json"
+
+        config: dict = {"mcpServers": {}}
+        if mcp_file.exists():
+            try:
+                config = json.loads(mcp_file.read_text("utf-8"))
+            except (json.JSONDecodeError, OSError):
+                config = {"mcpServers": {}}
+        if "mcpServers" not in config:
+            config["mcpServers"] = {}
+
+        existing = config["mcpServers"].get("ybe-check")
+        if existing and existing.get("command") == python_cmd:
+            typer.echo(f"[mcp] {mcp_file.relative_to(Path.cwd())} already configured — skipping.")
+            continue
+
+        config["mcpServers"]["ybe-check"] = mcp_entry
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        mcp_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        typer.echo(f"[mcp] Wrote MCP server config to {mcp_file.relative_to(Path.cwd())} ({label})")
 
 
 def _collect_api_keys() -> None:
@@ -255,7 +276,7 @@ def init(
     path: Path = typer.Argument(Path("."), help="Repository path to scan"),
     port: int = typer.Option(7474, "--port", "-p", help="Dashboard port"),
     skip_extension: bool = typer.Option(False, "--skip-extension", help="Skip VS Code/Cursor extension install"),
-    custom_keys: bool = typer.Option(False, "--custom-keys", help="Provide your own API keys instead of the built-in ones"),
+    custom_keys: bool = typer.Option(False, "--custom-keys", help="Provide your own API keys"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Don't auto-open browser"),
 ) -> None:
     """All-in-one: install extension, configure MCP, run scan, launch dashboard."""
@@ -273,7 +294,7 @@ def init(
         _collect_api_keys()
     else:
         typer.echo("\n━━━ Step 3/4: AI ━━━")
-        typer.echo("[ai] Using built-in AI key — ready to go.")
+        typer.echo("[ai] No API keys configured — static remediation fallback is active.")
 
     typer.echo("\n━━━ Step 4/4: Scan + Dashboard ━━━")
     repo = str(path.resolve())

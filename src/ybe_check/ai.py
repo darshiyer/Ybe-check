@@ -20,7 +20,6 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 BLACKBOX_ENDPOINT = "https://api.blackbox.ai/chat/completions"
 BLACKBOX_DEFAULT_MODEL = "blackboxai/openai/gpt-5.2-chat"
-_BUILTIN_BLACKBOX_KEY = "sk-Qe7VF9_rZ30nOOOw3kHwag"
 
 SYSTEM_PROMPT = (
     "You are a senior application-security engineer. "
@@ -57,8 +56,6 @@ def load_config() -> dict[str, Any]:
             cfg = json.loads(CONFIG_FILE.read_text("utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
-    if not cfg.get("blackbox_api_key"):
-        cfg["blackbox_api_key"] = _BUILTIN_BLACKBOX_KEY
     return cfg
 
 
