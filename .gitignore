@@ -2,6 +2,7 @@ node_modules/
 out/
 .next/
 .vscode/
+.cursor/
 .DS_Store
 *.vsix
 __pycache__/

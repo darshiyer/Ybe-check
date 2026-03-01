@@ -16,6 +16,7 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from .ai import enrich_finding, load_config
 from .core import filter_findings, load_report, run_scan
 
 mcp = FastMCP(
@@ -105,12 +106,13 @@ def get_remediation(
     path: str,
     finding_id: str,
 ) -> str:
-    """Return remediation guidance for a single finding.
+    """Return AI-powered remediation guidance for a single finding.
 
     Loads the report for *path* (from ``ybe-report.json`` if present,
     otherwise runs a fresh scan), locates the finding by *finding_id*,
     and returns its ``ai_analysis`` block.  When ``ai_analysis`` is
-    absent a minimal impact / remediation template is returned instead.
+    absent it is generated via the LLM chain (Blackbox AI -> Gemini ->
+    static fallback) and cached back to the report file.
 
     Args:
         path: Path to the repository.
@@ -128,28 +130,40 @@ def get_remediation(
         })
 
     ai = match.get("ai_analysis")
-    if ai:
-        return json.dumps({"finding_id": finding_id, **ai}, indent=2)
+    if not ai:
+        config = load_config()
+        ai = enrich_finding(match, config)
+        match["ai_analysis"] = ai
+        _cache_report(path, report)
 
-    severity = match.get("severity", "medium")
-    summary = match.get("summary", "")
-    source = match.get("source", "")
+    return json.dumps({"finding_id": finding_id, **ai}, indent=2)
 
-    return json.dumps({
-        "finding_id": finding_id,
-        "impact": f"This {severity}-severity finding from '{source}' may affect production readiness.",
-        "remediation": (
-            f"Address the {source} finding: {summary[:200]}. "
-            f"Severity: {severity}. "
-            "Review the file/location and apply the recommended fix. "
-            "For production, ensure no secrets are committed and dependencies are pinned."
-        ),
-    }, indent=2)
+
+def _cache_report(path: str, report: dict) -> None:
+    """Write enriched report back to ybe-report.json for future loads."""
+    report_path = Path(path) / REPORT_FILENAME
+    try:
+        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def main() -> None:
-    """Entry-point: start the MCP server over stdio."""
-    mcp.run(transport="stdio")
+    """Entry-point: stdio (local) or HTTP (remote/demo) transport.
+
+    Usage:
+      python -m ybe_check.mcp_server           # stdio — for Cursor/VS Code local
+      python -m ybe_check.mcp_server --remote  # HTTP on port 8000 — for ngrok/demo
+    """
+    import sys
+    if "--remote" in sys.argv:
+        port = int(next(
+            (sys.argv[sys.argv.index("--port") + 1] for _ in ["x"] if "--port" in sys.argv),
+            8000,
+        ))
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    else:
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

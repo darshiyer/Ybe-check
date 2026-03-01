@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Ybe Check - AI Security Scanner</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#7d6bef",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#07080c", 
+                        "surface-dark": "#141122",
+                        "surface-light": "#292447",
+                        "accent-yellow": "#FFC107",
+                        "accent-orange": "#fa6938",
+                        "accent-green": "#0bda6c",
+                        "accent-red": "#EF4444",
+                    },
+                    fontFamily: {
+                        display: ["Inter", "sans-serif"],
+                        mono: ["'Fira Code'", "monospace"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem", 
+                        "xl": "1.5rem",
+                        "2xl": "2rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        /* Custom scrollbar for dark mode */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #141122; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #292447; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3b3465; 
+        }
+        
+        .glass-panel {
+            background: rgba(20, 17, 34, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(124, 107, 239, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display min-h-screen flex overflow-hidden">
+<!-- Left Sidebar: AI Chat Panel -->
+<aside class="w-[340px] flex-shrink-0 bg-surface-dark border-r border-white/5 flex flex-col h-screen z-20">
+<!-- Sidebar Header -->
+<div class="h-16 flex items-center px-6 border-b border-white/5 gap-3">
+<div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-xl">security</span>
+</div>
+<div>
+<h1 class="font-bold text-lg leading-none tracking-tight">Ybe Check</h1>
+<p class="text-xs text-slate-400 mt-1">AI Security Assistant</p>
+</div>
+</div>
+<!-- Chat History -->
+<div class="flex-1 overflow-y-auto p-4 space-y-6">
+<!-- Date separator -->
+<div class="flex justify-center">
+<span class="text-[10px] font-medium text-slate-500 bg-white/5 px-2 py-1 rounded-full">Today</span>
+</div>
+<!-- AI Message -->
+<div class="flex gap-3">
+<div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-800 flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-sm text-white">smart_toy</span>
+</div>
+<div class="flex flex-col gap-1 max-w-[85%]">
+<div class="bg-[#292447] p-3 rounded-2xl rounded-tl-none text-sm leading-relaxed text-slate-200">
+                        I've completed the scan on <code class="bg-black/30 px-1 py-0.5 rounded text-xs text-primary font-mono">/src/auth</code>. I found 3 critical vulnerabilities related to JWT signing keys.
+                    </div>
+<span class="text-[10px] text-slate-500 ml-1">10:23 AM</span>
+</div>
+</div>
+<!-- User Message -->
+<div class="flex gap-3 flex-row-reverse">
+<div class="w-8 h-8 rounded-full bg-slate-700 flex-shrink-0 flex items-center justify-center overflow-hidden">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="Profile photo of a young woman with short hair" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBD33oq-SYDKd9MiybcZ4tOxcxVCI4LhIllXKfCk7aWeKQ-kXi_h2uCtgDG1-R2rHK-zL8mGN7OgrDbHPurP-XE2mNee8jAJ2Y9CUoQjPMOLWs_CWxTMyKHnhcQocqzyi8qyFzrmbJwBf2uEtuOxNsfUyOHtFFQDfsLn4-iSfLCD3AcbJgTY9Mdu5Pcx1sfeuWc6859dQ7N0Dp6Ain2uHB7fnI0EhOyaYItAf_3N2EO752E3C6pOk38lxEAAv9oBtyqpdo9MSA-ai4"/>
+</div>
+<div class="flex flex-col gap-1 items-end max-w-[85%]">
+<div class="bg-primary p-3 rounded-2xl rounded-tr-none text-sm leading-relaxed text-white">
+                        Can you explain the fix for the hardcoded secret in config.js?
+                    </div>
+<span class="text-[10px] text-slate-500 mr-1">10:24 AM</span>
+</div>
+</div>
+<!-- AI Message -->
+<div class="flex gap-3">
+<div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-800 flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-sm text-white">smart_toy</span>
+</div>
+<div class="flex flex-col gap-1 max-w-[85%]">
+<div class="bg-[#292447] p-3 rounded-2xl rounded-tl-none text-sm leading-relaxed text-slate-200">
+                        Certainly. You should move the secret to an environment variable. Here is the suggested code change:
+                        <div class="mt-2 bg-black/40 rounded p-2 font-mono text-xs overflow-x-auto text-green-400">
+                            - const key = "secret_123";<br/>
+                            + const key = process.env.API_KEY;
+                        </div>
+</div>
+<span class="text-[10px] text-slate-500 ml-1">10:25 AM</span>
+</div>
+</div>
+<!-- Typing Indicator -->
+<div class="flex gap-3">
+<div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-800 flex-shrink-0 flex items-center justify-center opacity-50">
+<span class="material-symbols-outlined text-sm text-white">smart_toy</span>
+</div>
+<div class="bg-[#292447] px-4 py-3 rounded-2xl rounded-tl-none flex items-center gap-1 w-16">
+<div class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></div>
+<div class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-75"></div>
+<div class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-150"></div>
+</div>
+</div>
+</div>
+<!-- Input Area -->
+<div class="p-4 border-t border-white/5 bg-surface-dark">
+<div class="relative">
+<input class="w-full bg-[#1e1b2e] text-sm text-white placeholder-slate-500 rounded-xl py-3 pl-4 pr-12 border-none focus:ring-2 focus:ring-primary/50 outline-none" placeholder="Ask Ybe about vulnerabilities..." type="text"/>
+<button class="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-primary hover:bg-white/5 rounded-lg transition-colors">
+<span class="material-symbols-outlined text-[20px]">send</span>
+</button>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen overflow-hidden bg-background-light dark:bg-background-dark relative">
+<!-- Top Bar -->
+<header class="h-16 flex items-center justify-between px-8 border-b border-white/5 bg-background-dark/50 backdrop-blur-sm z-10">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20">
+<div class="w-2 h-2 rounded-full bg-accent-green animate-pulse"></div>
+<span class="text-xs font-medium text-accent-green uppercase tracking-wider">System Operational</span>
+</div>
+<span class="text-slate-500 text-sm">Last scan: <span class="text-slate-300">2 mins ago</span></span>
+</div>
+<div class="flex items-center gap-4">
+<button class="w-9 h-9 rounded-full bg-surface-light flex items-center justify-center text-slate-300 hover:text-white hover:bg-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+</button>
+<button class="w-9 h-9 rounded-full bg-surface-light flex items-center justify-center text-slate-300 hover:text-white hover:bg-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+</button>
+<button class="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-[0_0_15px_rgba(124,107,239,0.3)]">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                    New Scan
+                </button>
+</div>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto p-8">
+<div class="max-w-6xl mx-auto flex flex-col gap-8">
+<!-- Overview Section -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- Score Card -->
+<div class="lg:col-span-4 glass-panel rounded-xl p-6 relative overflow-hidden group">
+<div class="absolute -right-10 -top-10 w-40 h-40 bg-primary/20 rounded-full blur-3xl group-hover:bg-primary/30 transition-all"></div>
+<h2 class="text-slate-400 text-sm font-medium mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-lg">verified_user</span>
+                            Production Readiness
+                        </h2>
+<div class="flex items-center justify-center py-4">
+<div class="relative w-40 h-40 flex items-center justify-center">
+<!-- Circular Progress SVG -->
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-surface-light" cx="80" cy="80" fill="transparent" r="70" stroke="currentColor" stroke-width="12"></circle>
+<circle class="text-accent-orange" cx="80" cy="80" fill="transparent" r="70" stroke="currentColor" stroke-dasharray="440" stroke-dashoffset="96" stroke-linecap="round" stroke-width="12"></circle>
+</svg>
+<div class="absolute flex flex-col items-center">
+<span class="text-4xl font-bold text-white tracking-tight">78</span>
+<span class="text-xs font-medium text-accent-orange uppercase mt-1">Good</span>
+</div>
+</div>
+</div>
+<p class="text-center text-xs text-slate-400 mt-2">12 checks passed out of 16 critical requirements</p>
+</div>
+<!-- Stats Grid -->
+<div class="lg:col-span-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+<!-- Stat Card 1 -->
+<div class="glass-panel rounded-xl p-5 flex flex-col justify-between border-l-4 border-l-primary/50">
+<div>
+<div class="text-slate-400 text-xs font-medium uppercase mb-1">Total Findings</div>
+<div class="text-3xl font-bold text-white">124</div>
+</div>
+<div class="mt-4 flex items-center gap-1 text-xs text-accent-green bg-accent-green/10 w-fit px-2 py-1 rounded">
+<span class="material-symbols-outlined text-[14px]">trending_down</span>
+<span>-12%</span>
+</div>
+</div>
+<!-- Stat Card 2 -->
+<div class="glass-panel rounded-xl p-5 flex flex-col justify-between border-l-4 border-l-accent-red">
+<div>
+<div class="text-slate-400 text-xs font-medium uppercase mb-1">Critical</div>
+<div class="text-3xl font-bold text-white">12</div>
+</div>
+<div class="mt-4 flex items-center gap-1 text-xs text-accent-red bg-accent-red/10 w-fit px-2 py-1 rounded">
+<span class="material-symbols-outlined text-[14px]">priority_high</span>
+<span>Action Req.</span>
+</div>
+</div>
+<!-- Stat Card 3 -->
+<div class="glass-panel rounded-xl p-5 flex flex-col justify-between border-l-4 border-l-accent-orange">
+<div>
+<div class="text-slate-400 text-xs font-medium uppercase mb-1">High Severity</div>
+<div class="text-3xl font-bold text-white">28</div>
+</div>
+<div class="mt-4 text-xs text-slate-400">Needs review</div>
+</div>
+<!-- Stat Card 4 -->
+<div class="glass-panel rounded-xl p-5 flex flex-col justify-between border-l-4 border-l-slate-600">
+<div>
+<div class="text-slate-400 text-xs font-medium uppercase mb-1">Medium / Low</div>
+<div class="text-3xl font-bold text-white">84</div>
+</div>
+<div class="mt-4 text-xs text-slate-400">Backlog</div>
+</div>
+</div>
+</div>
+<!-- Module Chips -->
+<div>
+<div class="flex items-center justify-between mb-3">
+<h3 class="text-white font-semibold text-lg">Scan Modules</h3>
+<button class="text-primary text-sm font-medium hover:text-white transition-colors">View All</button>
+</div>
+<div class="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+<!-- Chip 1: Active -->
+<div class="min-w-[200px] bg-primary/20 border border-primary/40 rounded-xl p-4 cursor-pointer hover:bg-primary/30 transition-all flex flex-col gap-2">
+<div class="flex justify-between items-start">
+<div class="bg-primary/20 p-2 rounded-lg text-primary">
+<span class="material-symbols-outlined">key</span>
+</div>
+<span class="w-2 h-2 rounded-full bg-accent-red"></span>
+</div>
+<div>
+<p class="text-white font-medium text-sm">Secrets</p>
+<p class="text-slate-400 text-xs">98 issues found</p>
+</div>
+</div>
+<!-- Chip 2 -->
+<div class="min-w-[200px] bg-surface-light border border-white/5 rounded-xl p-4 cursor-pointer hover:bg-surface-light/80 transition-all flex flex-col gap-2">
+<div class="flex justify-between items-start">
+<div class="bg-white/5 p-2 rounded-lg text-slate-300">
+<span class="material-symbols-outlined">psychology</span>
+</div>
+<span class="w-2 h-2 rounded-full bg-accent-orange"></span>
+</div>
+<div>
+<p class="text-slate-200 font-medium text-sm">Prompt Injection</p>
+<p class="text-slate-500 text-xs">85 issues found</p>
+</div>
+</div>
+<!-- Chip 3 -->
+<div class="min-w-[200px] bg-surface-light border border-white/5 rounded-xl p-4 cursor-pointer hover:bg-surface-light/80 transition-all flex flex-col gap-2">
+<div class="flex justify-between items-start">
+<div class="bg-white/5 p-2 rounded-lg text-slate-300">
+<span class="material-symbols-outlined">inventory_2</span>
+</div>
+<span class="w-2 h-2 rounded-full bg-accent-green"></span>
+</div>
+<div>
+<p class="text-slate-200 font-medium text-sm">Dependencies</p>
+<p class="text-slate-500 text-xs">All clear</p>
+</div>
+</div>
+<!-- Chip 4 -->
+<div class="min-w-[200px] bg-surface-light border border-white/5 rounded-xl p-4 cursor-pointer hover:bg-surface-light/80 transition-all flex flex-col gap-2">
+<div class="flex justify-between items-start">
+<div class="bg-white/5 p-2 rounded-lg text-slate-300">
+<span class="material-symbols-outlined">gavel</span>
+</div>
+<span class="w-2 h-2 rounded-full bg-accent-yellow"></span>
+</div>
+<div>
+<p class="text-slate-200 font-medium text-sm">Compliance</p>
+<p class="text-slate-500 text-xs">2 warnings</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Findings Table -->
+<div class="glass-panel rounded-xl overflow-hidden flex flex-col flex-1 min-h-[400px]">
+<div class="p-5 border-b border-white/5 flex items-center justify-between">
+<h3 class="text-white font-semibold text-lg flex items-center gap-2">
+                            Latest Findings
+                            <span class="text-xs bg-surface-light text-slate-400 px-2 py-0.5 rounded-full border border-white/5">24 New</span>
+</h3>
+<div class="flex items-center gap-3">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2.5 top-1.5 text-slate-500 text-[18px]">search</span>
+<input class="bg-surface-light border-none text-xs text-white placeholder-slate-500 rounded-lg py-1.5 pl-8 pr-3 focus:ring-1 focus:ring-primary w-48" placeholder="Filter findings..." type="text"/>
+</div>
+<button class="p-1.5 text-slate-400 hover:text-white rounded bg-surface-light">
+<span class="material-symbols-outlined text-[18px]">filter_list</span>
+</button>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="text-xs text-slate-400 border-b border-white/5 bg-surface-light/30">
+<th class="px-6 py-4 font-medium uppercase tracking-wider">ID</th>
+<th class="px-6 py-4 font-medium uppercase tracking-wider">Severity</th>
+<th class="px-6 py-4 font-medium uppercase tracking-wider">Type</th>
+<th class="px-6 py-4 font-medium uppercase tracking-wider">Source</th>
+<th class="px-6 py-4 font-medium uppercase tracking-wider text-right">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-white/5">
+<!-- Row 1 -->
+<tr class="hover:bg-white/[0.02] transition-colors group">
+<td class="px-6 py-4">
+<span class="text-slate-500 text-sm font-mono">#V-2931</span>
+</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-red/10 border border-accent-red/20 text-accent-red text-xs font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-accent-red"></span>
+                                            Critical
+                                        </div>
+</td>
+<td class="px-6 py-4">
+<span class="text-slate-200 text-sm">Hardcoded API Secret</span>
+</td>
+<td class="px-6 py-4">
+<code class="text-primary text-xs font-mono bg-primary/10 px-2 py-1 rounded">src/config/auth.js:42</code>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-xs font-medium text-white bg-primary hover:bg-primary/90 px-3 py-1.5 rounded-lg transition-colors shadow-lg shadow-primary/20">
+                                            Get Fix
+                                        </button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-white/[0.02] transition-colors group">
+<td class="px-6 py-4">
+<span class="text-slate-500 text-sm font-mono">#V-2932</span>
+</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-red/10 border border-accent-red/20 text-accent-red text-xs font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-accent-red"></span>
+                                            Critical
+                                        </div>
+</td>
+<td class="px-6 py-4">
+<span class="text-slate-200 text-sm">SQL Injection Risk</span>
+</td>
+<td class="px-6 py-4">
+<code class="text-primary text-xs font-mono bg-primary/10 px-2 py-1 rounded">src/db/users.ts:15</code>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-xs font-medium text-white bg-primary hover:bg-primary/90 px-3 py-1.5 rounded-lg transition-colors shadow-lg shadow-primary/20">
+                                            Get Fix
+                                        </button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-white/[0.02] transition-colors group">
+<td class="px-6 py-4">
+<span class="text-slate-500 text-sm font-mono">#V-2933</span>
+</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-orange/10 border border-accent-orange/20 text-accent-orange text-xs font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-accent-orange"></span>
+                                            High
+                                        </div>
+</td>
+<td class="px-6 py-4">
+<span class="text-slate-200 text-sm">Open S3 Bucket</span>
+</td>
+<td class="px-6 py-4">
+<code class="text-primary text-xs font-mono bg-primary/10 px-2 py-1 rounded">terraform/main.tf:88</code>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-xs font-medium text-white bg-primary hover:bg-primary/90 px-3 py-1.5 rounded-lg transition-colors shadow-lg shadow-primary/20">
+                                            Get Fix
+                                        </button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-white/[0.02] transition-colors group">
+<td class="px-6 py-4">
+<span class="text-slate-500 text-sm font-mono">#V-2934</span>
+</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-orange/10 border border-accent-orange/20 text-accent-orange text-xs font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-accent-orange"></span>
+                                            High
+                                        </div>
+</td>
+<td class="px-6 py-4">
+<span class="text-slate-200 text-sm">Outdated Package (Lodash)</span>
+</td>
+<td class="px-6 py-4">
+<code class="text-primary text-xs font-mono bg-primary/10 px-2 py-1 rounded">package.json:22</code>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-xs font-medium text-white bg-primary hover:bg-primary/90 px-3 py-1.5 rounded-lg transition-colors shadow-lg shadow-primary/20">
+                                            Get Fix
+                                        </button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination -->
+<div class="p-4 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
+<span>Showing 1-4 of 124 findings</span>
+<div class="flex gap-2">
+<button class="px-3 py-1 rounded bg-surface-light hover:bg-white/10 text-white disabled:opacity-50">Previous</button>
+<button class="px-3 py-1 rounded bg-surface-light hover:bg-white/10 text-white">Next</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

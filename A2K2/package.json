@@ -2,10 +2,10 @@
     "name": "ybe-check",
     "displayName": "Ybe Check",
     "description": "Production-readiness gatekeeper for vibe-coded apps",
-    "version": "0.17.0",
+    "version": "0.19.0",
     "publisher": "YbeCheck",
     "engines": {
-        "vscode": "^1.74.0"
+        "vscode": "^1.99.0"
     },
     "main": "./out/extension.js",
     "repository": {
@@ -36,6 +36,13 @@
                     "default": "python3",
                     "description": "Path to the Python executable."
                 }
+            }
+        },
+        "mcpServers": {
+            "ybe-check": {
+                "command": "${config:ybe-check.pythonPath}",
+                "args": ["-m", "ybe_check.mcp_server"],
+                "description": "Ybe Check – security and compliance scanner for AI-generated repos. Tools: ybe.scan_repo, ybe.list_findings, ybe.get_remediation."
             }
         }
     },
