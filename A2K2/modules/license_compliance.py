@@ -397,17 +397,88 @@ def get_remediation(package_name, license_id):
 
 
 # ---------------------------------------------------------------------------
-# npm package checker (no pip-licenses involved)
+# npm package checker — try license-checker when Node available, else fallback to lookup
 # ---------------------------------------------------------------------------
 
-def check_npm_packages(npm_packages: dict, details: list, seen: set):
+def run_license_checker(package_json_dir: str) -> dict | None:
     """
-    Check npm packages using KNOWN_NPM_LICENSES lookup.
-    Never calls pip-licenses — that tool is Python-only.
+    Run `npx license-checker --json` in the given directory (must contain package.json).
+    Returns { package_name_lower: license_string } or None on failure.
     """
-    for pkg_raw, (source_file, pkg_line) in npm_packages.items():
+    try:
+        result = subprocess.run(
+            ["npx", "--yes", "license-checker", "--json", "--direct", "0"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            cwd=package_json_dir,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        data = json.loads(result.stdout)
+        out = {}
+        for key, val in data.items():
+            # key is like "package@1.2.3" or "package@file:..."
+            if "@" in key:
+                pkg = key.split("@")[0].strip()
+                lic = (val or {}).get("licenses") or (val or {}).get("license") or "UNKNOWN"
+                if isinstance(lic, list):
+                    lic = "; ".join(str(x) for x in lic)
+                out[pkg.lower()] = str(lic).strip() if lic else "UNKNOWN"
+        return out
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return None
 
-        # Check known table first
+
+def check_npm_packages(npm_packages: dict, details: list, seen: set, repo_path: str):
+    """
+    Check npm packages: try license-checker when possible, else use KNOWN_NPM_LICENSES.
+    Only flag as Unverified when we truly can't determine the license.
+    """
+    # Try to get real licenses from the project (run from first package.json dir)
+    npm_lookup: dict | None = None
+    for pkg_raw, (source_file, _) in npm_packages.items():
+        # Resolve directory containing this package.json
+        if not repo_path:
+            break
+        dir_for_pkg = os.path.dirname(os.path.join(repo_path, source_file))
+        if os.path.isdir(dir_for_pkg) and os.path.exists(os.path.join(dir_for_pkg, "package.json")):
+            npm_lookup = run_license_checker(dir_for_pkg)
+            break
+    if not npm_lookup and npm_packages and repo_path:
+        # Fallback: run from repo root if it has package.json
+        if os.path.exists(os.path.join(repo_path, "package.json")):
+            npm_lookup = run_license_checker(repo_path)
+
+    for pkg_raw, (source_file, pkg_line) in npm_packages.items():
+        pkg_lower = pkg_raw.lower()
+
+        # If we got license-checker output, use it
+        if npm_lookup and pkg_lower in npm_lookup:
+            raw_license = npm_lookup[pkg_lower]
+            normalized = normalize_license(raw_license)
+            if normalized in LICENSE_RISK:
+                severity, reason = LICENSE_RISK[normalized]
+                if severity != "low":
+                    dedup_key = (pkg_raw, source_file, normalized)
+                    if dedup_key not in seen:
+                        seen.add(dedup_key)
+                        details.append({
+                            "file":       source_file,
+                            "line":       pkg_line,
+                            "type":       f"License Risk: {normalized}",
+                            "severity":   severity,
+                            "confidence": "high",
+                            "ecosystem":  "npm",
+                            "package":    pkg_raw,
+                            "license":    normalized,
+                            "reason":     f"'{pkg_raw}' uses {normalized} — {reason}",
+                            "remediation": get_remediation(pkg_raw, normalized),
+                        })
+            # low or unknown but resolved — skip unverified
+            continue
+
+        # No license-checker or package not in output — use known table or flag unverified
         if pkg_raw in KNOWN_NPM_LICENSES:
             license_id, risk_level = KNOWN_NPM_LICENSES[pkg_raw]
 
@@ -429,7 +500,7 @@ def check_npm_packages(npm_packages: dict, details: list, seen: set):
                             f"'{pkg_raw}' is an npm package — license could not be verified "
                             "without Node environment. Manual review recommended."
                         ),
-                        "remediation": f"Run `npm info {pkg_raw} license` to check the license.",
+                        "remediation": f"Run `npx license-checker --summary` in the project directory to verify.",
                     })
             # Known safe (low risk) — skip silently, no finding
             # If it were medium/high/critical we'd flag it here
@@ -452,8 +523,8 @@ def check_npm_packages(npm_packages: dict, details: list, seen: set):
                         f"'{pkg_raw}' is an npm package — license could not be verified "
                         "without Node environment. Manual review recommended."
                     ),
-                    "remediation": f"Run `npm info {pkg_raw} license` to check the license.",
-                })
+                        "remediation": f"Run `npx license-checker --summary` in the project directory to verify.",
+                    })
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +665,7 @@ def scan(repo_path: str) -> dict:
             }
 
         # --- Check npm packages via local lookup (no pip-licenses) ---
-        check_npm_packages(npm_packages, details, seen)
+        check_npm_packages(npm_packages, details, seen, repo_path)
 
         # --- Check pip packages via pip-licenses ---
         if pip_packages:

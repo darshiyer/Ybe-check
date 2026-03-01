@@ -100,7 +100,7 @@ export async function executeScan(
             const score = report.overall_score != null ? report.overall_score : 0;
             updateStatusBarMessage(`$(shield) Ybe Check: ${score}/100`);
 
-            showYbeCheckReport(report, context);
+            showYbeCheckReport(report, context, targetPath);
 
         } catch (error) {
             logMessage(`Error during Ybe Check: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');

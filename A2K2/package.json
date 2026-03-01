@@ -1,16 +1,42 @@
 {
     "name": "ybe-check",
     "displayName": "Ybe Check",
-    "description": "Production-readiness gatekeeper for vibe-coded apps",
-    "version": "0.22.0",
+    "description": "Production-readiness security gatekeeper for vibe-coded apps — 16 scan modules, AI remediation, MCP server, Copilot integration",
+    "version": "1.0.0",
     "publisher": "YbeCheck",
+    "icon": "icon.png",
     "engines": {
         "vscode": "^1.99.0"
     },
     "main": "./out/extension.js",
+    "categories": [
+        "Linters",
+        "Testing",
+        "Other"
+    ],
+    "keywords": [
+        "security",
+        "audit",
+        "scanner",
+        "vibe-coded",
+        "production-readiness",
+        "MCP",
+        "copilot",
+        "secrets",
+        "SBOM",
+        "compliance"
+    ],
+    "galleryBanner": {
+        "color": "#0a0a0b",
+        "theme": "dark"
+    },
     "repository": {
         "type": "git",
-        "url": "https://github.com/AddyCuber/A2K2"
+        "url": "https://github.com/AddyCuber/A2K2-PS1"
+    },
+    "homepage": "https://github.com/AddyCuber/A2K2-PS1#readme",
+    "bugs": {
+        "url": "https://github.com/AddyCuber/A2K2-PS1/issues"
     },
     "activationEvents": [
         "onStartupFinished"
@@ -40,6 +66,46 @@
             {
                 "command": "ybe-check.securityAudit",
                 "title": "Ybe Check: Security Audit with Copilot",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.explainFinding",
+                "title": "Ybe Check: Explain Finding (Educational)",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.reviewFile",
+                "title": "Ybe Check: Review Current File with Copilot",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.fixAllCritical",
+                "title": "Ybe Check: Fix All Critical/High Findings",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.fixCurrentFile",
+                "title": "Ybe Check: Fix All Issues in Current File",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.secureImplementation",
+                "title": "Ybe Check: Secure Implementation Helper",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.browseBySeverity",
+                "title": "Ybe Check: Browse Findings by Severity",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.installMcp",
+                "title": "Ybe Check: Install / Update MCP Server",
+                "category": "Ybe Check"
+            },
+            {
+                "command": "ybe-check.openDashboard",
+                "title": "Ybe Check: Open Full Dashboard (localhost)",
                 "category": "Ybe Check"
             }
         ],

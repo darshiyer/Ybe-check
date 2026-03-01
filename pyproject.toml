@@ -4,20 +4,24 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ybe-check"
-version = "0.2.1"
-description = "Production-readiness gatekeeper for vibe-coded apps. Scans repos for secrets, prompt injection, PII, dependencies, auth, IaC, SBOM, and more."
+version = "1.0.0"
+description = "Production-readiness security gatekeeper for vibe-coded apps — 16 scan modules, AI remediation, MCP server, VS Code extension, and bento dashboard."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [{ name = "Ybe Check", url = "https://github.com/AddyCuber/A2K2-PS1" }]
-keywords = ["security", "scan", "vibe-coded", "production-readiness"]
+keywords = ["security", "scan", "vibe-coded", "production-readiness", "mcp", "copilot", "audit", "sbom", "secrets", "compliance"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Intended Audience :: Developers",
 ]
 dependencies = [
     "typer>=0.9.0",

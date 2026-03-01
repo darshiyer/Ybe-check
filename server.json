@@ -2,17 +2,17 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.AddyCuber/ybe-check",
   "title": "Ybe Check",
-  "description": "Ybe Check – security and compliance orchestrator for AI-generated repositories.",
+  "description": "Ybe Check \u2014 production-readiness security gatekeeper for vibe-coded apps. 16 scan modules, AI remediation, bento dashboard, and Copilot integration.",
   "repository": {
     "url": "https://github.com/AddyCuber/A2K2-PS1",
     "source": "github"
   },
-  "version": "0.1.1",
+  "version": "1.0.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "ybe-check",
-      "version": "0.1.1",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
       }
@@ -86,6 +86,88 @@
         },
         "required": ["path", "finding_id"]
       }
+    },
+    {
+      "name": "ybe.get_security_context",
+      "description": "Get a structured security summary of the workspace including score, verdict, severity counts, module health, and top fixes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the repository."
+          }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "ybe.enhance_prompt",
+      "description": "Wrap any user prompt with security-aware context from the scan report so LLM responses are security-informed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the repository."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The user's original prompt to enhance."
+          }
+        },
+        "required": ["path", "prompt"]
+      }
+    },
+    {
+      "name": "ybe.get_fix_prompt",
+      "description": "Generate a ready-to-use fix prompt for a specific finding, including code context and severity info.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the repository."
+          },
+          "finding_id": {
+            "type": "string",
+            "description": "The finding ID to generate a fix prompt for."
+          }
+        },
+        "required": ["path", "finding_id"]
+      }
+    },
+    {
+      "name": "ybe.get_review_prompt",
+      "description": "Generate a security-focused code review prompt for a specific file, including all findings related to that file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the repository."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Relative path to the file to review."
+          }
+        },
+        "required": ["path", "file_path"]
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "name": "security-audit",
+      "description": "Comprehensive security audit prompt — reviews the entire scan report and produces a structured analysis."
+    },
+    {
+      "name": "fix-critical",
+      "description": "Fix all critical and high severity findings — generates step-by-step remediation plan."
+    },
+    {
+      "name": "review-file",
+      "description": "Security-focused file review prompt — checks a specific file against all known findings."
     }
   ]
 }
