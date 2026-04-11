@@ -1,156 +1,201 @@
 {
-    "name": "ybe-check",
-    "displayName": "Ybe Check",
-    "description": "Production-readiness security gatekeeper for vibe-coded apps — 16 scan modules, AI remediation, MCP server, Copilot integration",
-    "version": "1.0.0",
-    "publisher": "YbeCheck",
-    "icon": "icon.png",
-    "engines": {
-        "vscode": "^1.99.0"
-    },
-    "main": "./out/extension.js",
-    "categories": [
-        "Linters",
-        "Testing",
-        "Other"
+  "name": "ybe-check",
+  "displayName": "Ybe Check",
+  "description": "Production-readiness security gatekeeper for vibe-coded apps \u2014 16 scan modules, AI remediation, MCP server, Copilot integration",
+  "version": "1.0.0",
+  "publisher": "YbeCheck",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "main": "./out/extension.js",
+  "categories": [
+    "Linters",
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "security",
+    "audit",
+    "scanner",
+    "vibe-coded",
+    "production-readiness",
+    "MCP",
+    "copilot",
+    "secrets",
+    "SBOM",
+    "compliance"
+  ],
+  "galleryBanner": {
+    "color": "#0a0a0b",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AddyCuber/A2K2-PS1"
+  },
+  "homepage": "https://github.com/AddyCuber/A2K2-PS1#readme",
+  "bugs": {
+    "url": "https://github.com/AddyCuber/A2K2-PS1/issues"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ybe-check.fullScan",
+        "title": "Ybe Check: Full Audit (Static + Dynamic)",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.staticScan",
+        "title": "Ybe Check: Static Scan",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.askCopilot",
+        "title": "Ybe Check: Ask Copilot (with Security Context)",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.fixWithCopilot",
+        "title": "Ybe Check: Fix Finding with Copilot",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.securityAudit",
+        "title": "Ybe Check: Security Audit with Copilot",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.explainFinding",
+        "title": "Ybe Check: Explain Finding (Educational)",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.reviewFile",
+        "title": "Ybe Check: Review Current File with Copilot",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.fixAllCritical",
+        "title": "Ybe Check: Fix All Critical/High Findings",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.fixCurrentFile",
+        "title": "Ybe Check: Fix All Issues in Current File",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.secureImplementation",
+        "title": "Ybe Check: Secure Implementation Helper",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.browseBySeverity",
+        "title": "Ybe Check: Browse Findings by Severity",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.installMcp",
+        "title": "Ybe Check: Install / Update MCP Server",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.openDashboard",
+        "title": "Ybe Check: Open Full Dashboard (localhost)",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.runSidebarScan",
+        "title": "Ybe Check: Run Scan",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ybe-check.toggleAutoScan",
+        "title": "Ybe Check: Toggle Auto-Scan on Save"
+      },
+      {
+        "command": "ybe-check.exportReport",
+        "title": "Ybe Check: Export Report"
+      }
     ],
-    "keywords": [
-        "security",
-        "audit",
-        "scanner",
-        "vibe-coded",
-        "production-readiness",
-        "MCP",
-        "copilot",
-        "secrets",
-        "SBOM",
-        "compliance"
-    ],
-    "galleryBanner": {
-        "color": "#0a0a0b",
-        "theme": "dark"
-    },
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/AddyCuber/A2K2-PS1"
-    },
-    "homepage": "https://github.com/AddyCuber/A2K2-PS1#readme",
-    "bugs": {
-        "url": "https://github.com/AddyCuber/A2K2-PS1/issues"
-    },
-    "activationEvents": [
-        "onStartupFinished"
-    ],
-    "contributes": {
-        "commands": [
-            {
-                "command": "ybe-check.fullScan",
-                "title": "Ybe Check: Full Audit (Static + Dynamic)",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.staticScan",
-                "title": "Ybe Check: Static Scan",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.askCopilot",
-                "title": "Ybe Check: Ask Copilot (with Security Context)",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.fixWithCopilot",
-                "title": "Ybe Check: Fix Finding with Copilot",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.securityAudit",
-                "title": "Ybe Check: Security Audit with Copilot",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.explainFinding",
-                "title": "Ybe Check: Explain Finding (Educational)",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.reviewFile",
-                "title": "Ybe Check: Review Current File with Copilot",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.fixAllCritical",
-                "title": "Ybe Check: Fix All Critical/High Findings",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.fixCurrentFile",
-                "title": "Ybe Check: Fix All Issues in Current File",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.secureImplementation",
-                "title": "Ybe Check: Secure Implementation Helper",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.browseBySeverity",
-                "title": "Ybe Check: Browse Findings by Severity",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.installMcp",
-                "title": "Ybe Check: Install / Update MCP Server",
-                "category": "Ybe Check"
-            },
-            {
-                "command": "ybe-check.openDashboard",
-                "title": "Ybe Check: Open Full Dashboard (localhost)",
-                "category": "Ybe Check"
-            }
-        ],
-        "configuration": {
-            "title": "Ybe Check",
-            "properties": {
-                "ybe-check.pythonPath": {
-                    "type": "string",
-                    "default": "python3",
-                    "description": "Path to the Python executable."
-                }
-            }
-        },
-        "mcpServers": {
-            "ybe-check": {
-                "command": "${config:ybe-check.pythonPath}",
-                "args": ["-m", "ybe_check.mcp_server"],
-                "description": "Ybe Check – security scanner with prompt engineering for AI assistants. Tools: ybe.scan_repo, ybe.list_findings, ybe.get_remediation, ybe.get_security_context, ybe.enhance_prompt, ybe.get_fix_prompt, ybe.get_review_prompt. Prompts: security-audit, fix-critical, review-file."
-            }
+    "configuration": {
+      "title": "Ybe Check",
+      "properties": {
+        "ybe-check.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Path to the Python executable."
         }
+      }
     },
-    "scripts": {
-        "compile": "tsc -p ./",
-        "watch": "tsc -watch -p ./",
-        "pretest": "npm run compile && npm run lint",
-        "lint": "eslint src --ext ts",
-        "test": "npm run compile",
-        "package": "vsce package",
-        "package:rc": "vsce package --pre-release",
-        "publish": "vsce publish",
-        "publish:rc": "vsce publish --pre-release"
+    "mcpServers": {
+      "ybe-check": {
+        "command": "${config:ybe-check.pythonPath}",
+        "args": [
+          "-m",
+          "ybe_check.mcp_server"
+        ],
+        "description": "Ybe Check \u2013 security scanner with prompt engineering for AI assistants. Tools: ybe.scan_repo, ybe.list_findings, ybe.get_remediation, ybe.get_security_context, ybe.enhance_prompt, ybe.get_fix_prompt, ybe.get_review_prompt. Prompts: security-audit, fix-critical, review-file."
+      }
     },
-    "devDependencies": {
-        "@types/fs-extra": "^11.0.4",
-        "@types/node": "16.x",
-        "@types/vscode": "^1.74.0",
-        "@typescript-eslint/eslint-plugin": "^5.45.0",
-        "@typescript-eslint/parser": "^5.45.0",
-        "@vscode/test-electron": "^2.2.0",
-        "@vscode/vsce": "^3.2.1",
-        "eslint": "^8.28.0",
-        "typescript": "^4.9.3"
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ybe-check-sidebar",
+          "title": "Ybe Check",
+          "icon": "$(shield)"
+        }
+      ]
     },
-    "license": "Apache-2.0",
-    "dependencies": {
-        "fs-extra": "^11.3.3"
+    "views": {
+      "ybe-check-sidebar": [
+        {
+          "type": "webview",
+          "id": "ybeCheck.sidebar",
+          "name": "Security Scanner",
+          "icon": "$(shield)",
+          "contextualTitle": "Ybe Check"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "ybe-check.runSidebarScan",
+          "when": "view == ybeCheck.sidebar",
+          "group": "navigation"
+        }
+      ]
     }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "npm run compile",
+    "package": "vsce package",
+    "package:rc": "vsce package --pre-release",
+    "publish": "vsce publish",
+    "publish:rc": "vsce publish --pre-release"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "@vscode/test-electron": "^2.2.0",
+    "@vscode/vsce": "^3.2.1",
+    "eslint": "^8.28.0",
+    "typescript": "^4.9.3"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "fs-extra": "^11.3.3"
+  }
 }

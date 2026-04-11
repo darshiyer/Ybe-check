@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ybe Check — Sidebar Preview</title>
+<style>
+  body {
+    margin: 0;
+    background: #1e1e2e;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 40px 20px;
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+  }
+
+  /* VS Code chrome simulation */
+  .vscode-chrome {
+    display: flex;
+    width: 900px;
+    height: 640px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+  }
+
+  /* Activity Bar */
+  .activity-bar {
+    width: 48px;
+    background: #181825;
+    border-right: 1px solid #2a2a3d;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    gap: 4px;
+  }
+  .ab-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    cursor: pointer;
+    color: #6e6e8a;
+    transition: all 0.15s;
+  }
+  .ab-icon:hover { color: #cdd6f4; }
+  .ab-icon.active {
+    color: #cdd6f4;
+    background: rgba(124,58,237,0.15);
+    position: relative;
+  }
+  .ab-icon.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: #7c3aed;
+    border-radius: 0 2px 2px 0;
+  }
+  .ab-spacer { flex: 1; }
+
+  /* Main panel */
+  .panel {
+    width: 260px;
+    background: #0d1117;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid #21262d;
+  }
+
+  /* Editor area */
+  .editor {
+    flex: 1;
+    background: #1e1e2e;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .editor-tabs {
+    height: 35px;
+    background: #181825;
+    border-bottom: 1px solid #2a2a3d;
+    display: flex;
+    align-items: center;
+    padding: 0 0;
+    gap: 0;
+  }
+  .tab {
+    height: 35px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #6e6e8a;
+    border-right: 1px solid #2a2a3d;
+    cursor: pointer;
+  }
+  .tab.active {
+    color: #cdd6f4;
+    background: #1e1e2e;
+    border-bottom: 2px solid #7c3aed;
+  }
+  .tab-dot { width: 6px; height: 6px; border-radius: 50%; background: #f85149; }
+  .editor-content {
+    flex: 1;
+    padding: 20px 24px;
+    overflow: hidden;
+  }
+  .code-line {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #6e6e8a;
+    display: flex;
+    gap: 16px;
+  }
+  .code-line.highlight { background: rgba(248,81,73,0.06); border-left: 2px solid #f85149; margin-left: -24px; padding-left: 22px; }
+  .ln { color: #404059; min-width: 20px; text-align: right; }
+  .kw { color: #cba6f7; }
+  .str { color: #a6e3a1; }
+  .var { color: #89dceb; }
+  .cm { color: #6c7086; font-style: italic; }
+  .fn { color: #89b4fa; }
+  .op { color: #f38ba8; }
+
+  /* ── SIDEBAR PANEL STYLES ── */
+  :root {
+    --bg:      #0d1117;
+    --surface: #161b22;
+    --surface2:#1c2128;
+    --border:  #30363d;
+    --border2: #21262d;
+    --text:    #e6edf3;
+    --muted:   #7d8590;
+    --accent:  #7c3aed;
+    --accent2: #a855f7;
+    --glow:    rgba(124,58,237,0.18);
+    --crit:    #f85149;
+    --high:    #fb8f44;
+    --med:     #d29922;
+    --low:     #388bfd;
+    --pass:    #3fb950;
+    --copilot: #19b394;
+    --r:       8px;
+  }
+
+  .panel * { box-sizing: border-box; margin: 0; padding: 0; }
+  .panel { font-size: 12px; color: var(--text); }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* HEADER */
+  .header {
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(160deg, #0f1318 0%, #0d1117 100%);
+    flex-shrink: 0;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 14px;
+  }
+  .brand-logo {
+    width: 30px; height: 30px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px; display: flex; align-items: center;
+    justify-content: center; font-size: 15px;
+    box-shadow: 0 0 16px var(--glow); flex-shrink: 0;
+  }
+  .brand-name { font-size: 13px; font-weight: 700; letter-spacing: .3px; }
+  .brand-sub  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .brand-badge {
+    font-size: 9px; color: var(--muted); background: var(--surface2);
+    padding: 2px 7px; border-radius: 10px; border: 1px solid var(--border);
+    align-self: flex-start; flex-shrink: 0;
+  }
+
+  /* SCORE RING */
+  .score-row { display: flex; align-items: center; gap: 14px; }
+  .ring-wrap  { position: relative; width: 88px; height: 88px; flex-shrink: 0; }
+  .ring-wrap svg { transform: rotate(-90deg); }
+  .ring-bg   { fill: none; stroke: var(--surface2); stroke-width: 7; }
+  .ring-fill {
+    fill: none; stroke-width: 7; stroke-linecap: round;
+    stroke-dasharray: 226.19;
+    stroke-dashoffset: 62;
+    transition: stroke-dashoffset 1.2s cubic-bezier(.4,0,.2,1), stroke .5s ease;
+  }
+  .ring-text {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%,-50%); text-align: center;
+  }
+  .ring-num   { font-size: 24px; font-weight: 800; line-height: 1; color: #d29922; }
+  .ring-denom { font-size: 9px; color: var(--muted); letter-spacing: .5px; }
+
+  .score-meta { flex: 1; min-width: 0; }
+  .verdict-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 600; padding: 3px 10px;
+    border-radius: 20px; margin-bottom: 9px; letter-spacing: .3px; border: 1px solid;
+  }
+  .verdict-chip.attention { background: rgba(210,153,34,.12); color: var(--med); border-color: rgba(210,153,34,.3); }
+
+  .stats-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); }
+  .stat-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ACTIONS */
+  .actions {
+    padding: 10px 14px; display: flex; gap: 8px; align-items: center;
+    border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0;
+  }
+  .btn-scan {
+    flex: 1; height: 34px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; border: none; border-radius: var(--r);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: all .2s; letter-spacing: .3px;
+    box-shadow: 0 2px 8px var(--glow);
+  }
+  .btn-scan:hover { transform: translateY(-1px); box-shadow: 0 4px 16px var(--glow); }
+
+  .auto-wrap { display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; }
+  .auto-label { font-size: 9px; color: var(--muted); letter-spacing: .3px; text-transform: uppercase; }
+  .toggle { position: relative; width: 32px; height: 17px; cursor: pointer; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .t-slider {
+    position: absolute; inset: 0; background: rgba(124,58,237,.25);
+    border: 1px solid var(--accent); border-radius: 9px; transition: .2s;
+  }
+  .t-slider::before {
+    content: ''; position: absolute; width: 11px; height: 11px;
+    left: 2px; top: 50%; transform: translate(15px,-50%);
+    background: var(--accent); border-radius: 50%;
+    box-shadow: 0 0 6px var(--glow); transition: .2s;
+  }
+
+  /* MODULES */
+  .modules-section { padding: 12px 14px; overflow-y: auto; flex: 1; }
+  .section-label {
+    font-size: 9px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--muted); margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border2); }
+
+  /* MODULE CARD */
+  .module-card {
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: var(--r); margin-bottom: 6px; overflow: hidden;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .module-card.open { border-color: var(--border); box-shadow: 0 2px 12px rgba(0,0,0,.3); }
+  .module-header {
+    display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+    cursor: pointer; user-select: none;
+  }
+  .module-header:hover { background: var(--surface2); }
+  .sev-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .module-name { flex: 1; font-size: 12px; font-weight: 500; }
+  .pass-tick  { font-size: 11px; color: var(--pass); margin-right: 2px; }
+  .module-score { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .score-denom { font-size: 9px; color: var(--muted); font-weight: 400; }
+  .chevron { color: var(--muted); transition: transform .2s; flex-shrink: 0; font-size: 10px; }
+  .module-card.open .chevron { transform: rotate(90deg); }
+  .module-body { display: none; padding: 0 11px 11px; border-top: 1px solid var(--border2); }
+  .module-card.open .module-body { display: block; }
+
+  /* FINDING */
+  .finding {
+    padding: 9px 10px; background: var(--surface2); border-radius: 6px;
+    margin-top: 8px; border-left: 2px solid;
+  }
+  .finding-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .sev-badge {
+    font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 10px;
+    text-transform: uppercase; letter-spacing: .5px; border: 1px solid;
+  }
+  .rule-id {
+    font-size: 9px; font-family: 'Cascadia Code','Fira Code',monospace;
+    color: var(--muted); background: var(--surface); padding: 1px 5px;
+    border-radius: 4px; border: 1px solid var(--border2);
+  }
+  .finding-desc   { font-size: 11px; color: var(--text); margin-bottom: 4px; line-height: 1.45; font-weight: 500; }
+  .finding-location { font-family: 'Cascadia Code','Fira Code',monospace; font-size: 10px; color: var(--muted); margin-bottom: 7px; }
+  .finding-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+  .btn-fix {
+    height: 24px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 500;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+    transition: all .15s; white-space: nowrap;
+  }
+  .btn-fix:hover { background: var(--surface2); }
+  .btn-copy:hover   { border-color: var(--accent); color: var(--accent); }
+  .btn-copilot:hover { border-color: var(--copilot); color: var(--copilot); }
+
+  .no-findings { font-size: 11px; color: var(--muted); padding: 8px 0 2px; display: flex; align-items: center; gap: 5px; }
+  .mod-footer-actions { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border2); }
+  .btn-mod-all {
+    height: 24px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted); font-size: 10px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px; transition: all .15s;
+  }
+  .btn-mod-all:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* FOOTER */
+  .footer {
+    padding: 8px 14px; border-top: 1px solid var(--border2);
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--muted); font-size: 10px; background: var(--bg); flex-shrink: 0;
+  }
+  .footer-left { display: flex; align-items: center; gap: 5px; }
+  .footer-dot  { width: 5px; height: 5px; border-radius: 50%; background: var(--pass); }
+  .btn-export  {
+    background: none; border: none; color: var(--muted); font-size: 10px;
+    cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: all .15s;
+  }
+  .btn-export:hover { color: var(--text); background: var(--surface2); }
+
+  /* TOAST */
+  .toast {
+    position: fixed; bottom: 14px; left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 6px 14px; font-size: 11px; font-weight: 500;
+    opacity: 0; transition: all .25s; pointer-events: none; white-space: nowrap;
+    z-index: 999; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.success { border-color: rgba(63,185,80,.4); color: var(--pass); }
+  .toast.info    { border-color: rgba(124,58,237,.4); color: var(--accent2); }
+
+  /* Watermark */
+  .preview-label {
+    position: fixed; bottom: 12px; right: 16px;
+    font-size: 10px; color: rgba(255,255,255,0.2);
+    font-family: -apple-system, sans-serif;
+  }
+</style>
+</head>
+<body>
+
+<div class="vscode-chrome">
+
+  <!-- Activity Bar -->
+  <div class="activity-bar">
+    <div class="ab-icon" title="Explorer">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7h7M3 12h18M3 17h18M14 3l4 4-4 4"/></svg>
+    </div>
+    <div class="ab-icon" title="Search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+    </div>
+    <div class="ab-icon" title="Source Control">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="10" r="3"/><path d="M6 9v6M6 9c0-2 1.5-3 3-3h3M9 10h3"/></svg>
+    </div>
+    <div class="ab-spacer"></div>
+    <div class="ab-icon active" title="Ybe Check — Security Scanner">
+      🛡️
+    </div>
+    <div class="ab-spacer"></div>
+    <div class="ab-icon" title="Extensions">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+    </div>
+    <div class="ab-icon" title="Settings">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
+    </div>
+  </div>
+
+  <!-- Ybe Check Sidebar Panel -->
+  <div class="panel">
+
+    <!-- HEADER -->
+    <div class="header">
+      <div class="brand">
+        <div class="brand-logo">🛡️</div>
+        <div style="flex:1">
+          <div class="brand-name">Ybe Check</div>
+          <div class="brand-sub">AI Security Scanner</div>
+        </div>
+        <div class="brand-badge">v1.0</div>
+      </div>
+
+      <div class="score-row">
+        <div class="ring-wrap">
+          <svg width="88" height="88" viewBox="0 0 88 88">
+            <circle class="ring-bg"   cx="44" cy="44" r="36"/>
+            <circle class="ring-fill" cx="44" cy="44" r="36" stroke="#d29922"/>
+          </svg>
+          <div class="ring-text">
+            <div class="ring-num" id="scoreNum">0</div>
+            <div class="ring-denom">/100</div>
+          </div>
+        </div>
+        <div class="score-meta">
+          <div class="verdict-chip attention">⚡ NEEDS ATTENTION</div>
+          <div class="stats-row">
+            <div class="stat"><span class="stat-dot" style="background:var(--crit)"></span>2 critical</div>
+            <div class="stat"><span class="stat-dot" style="background:var(--high)"></span>4 high</div>
+            <div class="stat"><span class="stat-dot" style="background:var(--med)"></span>3 medium</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACTIONS -->
+    <div class="actions">
+      <button class="btn-scan" onclick="simulateScan()">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a4 4 0 1 1 0 8A4 4 0 0 1 8 4zm0 1.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/><path d="M.5 8a7.5 7.5 0 1 1 15 0A7.5 7.5 0 0 1 .5 8zm7.5-6a6 6 0 1 0 0 12A6 6 0 0 0 8 2z"/></svg>
+        Run Scan
+      </button>
+      <div class="auto-wrap">
+        <div class="auto-label">Auto</div>
+        <label class="toggle">
+          <input type="checkbox" checked>
+          <span class="t-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- MODULES -->
+    <div class="modules-section">
+      <div class="section-label">Modules <span style="color:var(--accent);margin-left:4px">8</span></div>
+
+      <!-- Auth Guards — CRITICAL, OPEN -->
+      <div class="module-card open">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--crit)"></span>
+          <span class="module-name">Auth Guards</span>
+          <span class="module-score" style="color:var(--crit)">0<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="finding" style="border-left-color:#f85149">
+            <div class="finding-top">
+              <span class="sev-badge" style="background:rgba(248,81,73,.15);color:#f85149;border-color:rgba(248,81,73,.3)">critical</span>
+              <span class="rule-id">AUTH-001</span>
+            </div>
+            <div class="finding-desc">Unprotected /admin route — no auth middleware detected</div>
+            <div class="finding-location">📄 src/routes/admin.py:14</div>
+            <div class="finding-actions">
+              <button class="btn-fix btn-copy" onclick="copyAndToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                Copy Prompt
+              </button>
+              <button class="btn-fix btn-copilot" onclick="copilotToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                Open in Copilot
+              </button>
+            </div>
+          </div>
+          <div class="finding" style="border-left-color:#f85149">
+            <div class="finding-top">
+              <span class="sev-badge" style="background:rgba(248,81,73,.15);color:#f85149;border-color:rgba(248,81,73,.3)">critical</span>
+              <span class="rule-id">AUTH-003</span>
+            </div>
+            <div class="finding-desc">DEBUG=True in production config — disables all security checks</div>
+            <div class="finding-location">📄 app/settings.py:8</div>
+            <div class="finding-actions">
+              <button class="btn-fix btn-copy" onclick="copyAndToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                Copy Prompt
+              </button>
+              <button class="btn-fix btn-copilot" onclick="copilotToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                Open in Copilot
+              </button>
+            </div>
+          </div>
+          <div class="mod-footer-actions">
+            <button class="btn-mod-all" onclick="copyAndToast()">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+              Copy all Auth Guards issues
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Secrets Detection — HIGH -->
+      <div class="module-card">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--high)"></span>
+          <span class="module-name">Secrets Detection</span>
+          <span class="module-score" style="color:var(--high)">60<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="finding" style="border-left-color:#fb8f44">
+            <div class="finding-top">
+              <span class="sev-badge" style="background:rgba(251,143,68,.15);color:#fb8f44;border-color:rgba(251,143,68,.3)">high</span>
+              <span class="rule-id">SEC-001</span>
+            </div>
+            <div class="finding-desc">Hardcoded GitHub API token assigned to variable</div>
+            <div class="finding-location">📄 src/config.py:23</div>
+            <div class="finding-actions">
+              <button class="btn-fix btn-copy" onclick="copyAndToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                Copy Prompt
+              </button>
+              <button class="btn-fix btn-copilot" onclick="copilotToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                Open in Copilot
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Prompt Injection — HIGH -->
+      <div class="module-card">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--high)"></span>
+          <span class="module-name">Prompt Injection</span>
+          <span class="module-score" style="color:var(--high)">45<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="finding" style="border-left-color:#fb8f44">
+            <div class="finding-top">
+              <span class="sev-badge" style="background:rgba(251,143,68,.15);color:#fb8f44;border-color:rgba(251,143,68,.3)">high</span>
+              <span class="rule-id">INJ-002</span>
+            </div>
+            <div class="finding-desc">Unsanitised user input passed directly into LLM prompt</div>
+            <div class="finding-location">📄 api/chat.py:67</div>
+            <div class="finding-actions">
+              <button class="btn-fix btn-copy" onclick="copyAndToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                Copy Prompt
+              </button>
+              <button class="btn-fix btn-copilot" onclick="copilotToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                Open in Copilot
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PII & Logging — MEDIUM -->
+      <div class="module-card">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--med)"></span>
+          <span class="module-name">PII &amp; Logging</span>
+          <span class="module-score" style="color:var(--med)">80<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="finding" style="border-left-color:#d29922">
+            <div class="finding-top">
+              <span class="sev-badge" style="background:rgba(210,153,34,.15);color:#d29922;border-color:rgba(210,153,34,.3)">medium</span>
+              <span class="rule-id">PII-003</span>
+            </div>
+            <div class="finding-desc">Aadhaar number pattern found in log statement</div>
+            <div class="finding-location">📄 utils/logger.py:112</div>
+            <div class="finding-actions">
+              <button class="btn-fix btn-copy" onclick="copyAndToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                Copy Prompt
+              </button>
+              <button class="btn-fix btn-copilot" onclick="copilotToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                Open in Copilot
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- IaC Security — MEDIUM -->
+      <div class="module-card">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--med)"></span>
+          <span class="module-name">IaC Security</span>
+          <span class="module-score" style="color:var(--med)">70<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="finding" style="border-left-color:#d29922">
+            <div class="finding-top">
+              <span class="sev-badge" style="background:rgba(210,153,34,.15);color:#d29922;border-color:rgba(210,153,34,.3)">medium</span>
+              <span class="rule-id">IAC-005</span>
+            </div>
+            <div class="finding-desc">Docker container running as root user</div>
+            <div class="finding-location">📄 Dockerfile:3</div>
+            <div class="finding-actions">
+              <button class="btn-fix btn-copy" onclick="copyAndToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                Copy Prompt
+              </button>
+              <button class="btn-fix btn-copilot" onclick="copilotToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                Open in Copilot
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dependencies — PASS -->
+      <div class="module-card">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--pass)"></span>
+          <span class="module-name">Dependencies</span>
+          <span class="pass-tick">✓</span>
+          <span class="module-score" style="color:var(--pass)">100<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="no-findings">✓ No vulnerabilities detected</div>
+        </div>
+      </div>
+
+      <!-- License Compliance — PASS -->
+      <div class="module-card">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--pass)"></span>
+          <span class="module-name">License Compliance</span>
+          <span class="pass-tick">✓</span>
+          <span class="module-score" style="color:var(--pass)">95<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="no-findings">✓ All licenses cleared</div>
+        </div>
+      </div>
+
+      <!-- AI Traceability — LOW -->
+      <div class="module-card">
+        <div class="module-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="sev-dot" style="background:var(--low)"></span>
+          <span class="module-name">AI Traceability</span>
+          <span class="module-score" style="color:var(--low)">60<span class="score-denom">/100</span></span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="module-body">
+          <div class="finding" style="border-left-color:#388bfd">
+            <div class="finding-top">
+              <span class="sev-badge" style="background:rgba(56,139,253,.15);color:#388bfd;border-color:rgba(56,139,253,.3)">low</span>
+              <span class="rule-id">AI-003</span>
+            </div>
+            <div class="finding-desc">AI generation markers found without AI_USAGE.md disclosure</div>
+            <div class="finding-location">📄 src/models/user.py:1</div>
+            <div class="finding-actions">
+              <button class="btn-fix btn-copy" onclick="copyAndToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                Copy Prompt
+              </button>
+              <button class="btn-fix btn-copilot" onclick="copilotToast()">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                Open in Copilot
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /modules-section -->
+
+    <!-- FOOTER -->
+    <div class="footer">
+      <div class="footer-left">
+        <div class="footer-dot"></div>
+        Last scan: 2:47 PM
+      </div>
+      <button class="btn-export">Export ↗</button>
+    </div>
+
+  </div><!-- /panel -->
+
+  <!-- Editor Area -->
+  <div class="editor">
+    <div class="editor-tabs">
+      <div class="tab active">
+        <div class="tab-dot"></div>
+        admin.py
+      </div>
+      <div class="tab">config.py</div>
+      <div class="tab">chat.py</div>
+    </div>
+    <div class="editor-content">
+      <div class="code-line"><span class="ln">1</span><span class="kw">from</span> <span class="var">flask</span> <span class="kw">import</span> <span class="var">Blueprint, request, jsonify</span></div>
+      <div class="code-line"><span class="ln">2</span><span></span></div>
+      <div class="code-line"><span class="ln">3</span><span class="var">admin</span> <span class="op">=</span> <span class="fn">Blueprint</span><span>(<span class="str">'admin'</span>, __name__)</span></div>
+      <div class="code-line"><span class="ln">4</span><span></span></div>
+      <div class="code-line"><span class="ln">5</span><span class="cm"># TODO: add auth middleware here</span></div>
+      <div class="code-line"><span class="ln">6</span><span class="op">@</span><span class="var">admin</span><span>.</span><span class="fn">route</span><span>(<span class="str">'/admin/users'</span>, methods=[<span class="str">'GET'</span>])</span></div>
+      <div class="code-line highlight"><span class="ln">7</span><span class="kw">def</span> <span class="fn">get_all_users</span><span>():</span></div>
+      <div class="code-line highlight"><span class="ln">8</span><span>&nbsp;&nbsp;&nbsp;&nbsp;users <span class="op">=</span> <span class="var">db</span>.<span class="fn">query</span>(<span class="str">"SELECT * FROM users"</span>)</span></div>
+      <div class="code-line highlight"><span class="ln">9</span><span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="kw">return</span> <span class="fn">jsonify</span>(users)</span></div>
+      <div class="code-line"><span class="ln">10</span><span></span></div>
+      <div class="code-line"><span class="ln">11</span><span class="op">@</span><span class="var">admin</span><span>.</span><span class="fn">route</span><span>(<span class="str">'/admin/delete'</span>, methods=[<span class="str">'DELETE'</span>])</span></div>
+      <div class="code-line"><span class="ln">12</span><span class="kw">def</span> <span class="fn">delete_user</span><span>():</span></div>
+      <div class="code-line"><span class="ln">13</span><span>&nbsp;&nbsp;&nbsp;&nbsp;user_id <span class="op">=</span> <span class="var">request</span>.<span class="fn">get_json</span>().<span class="fn">get</span>(<span class="str">'id'</span>)</span></div>
+      <div class="code-line"><span class="ln">14</span><span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="var">db</span>.<span class="fn">execute</span>(<span class="str">f"DELETE FROM users WHERE id={user_id}"</span>)</span></div>
+      <div class="code-line"><span class="ln">15</span><span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="kw">return</span> <span class="fn">jsonify</span>({<span class="str">'ok'</span>: <span class="kw">True</span>})</span></div>
+    </div>
+  </div>
+
+</div><!-- /vscode-chrome -->
+
+<div class="preview-label">Ybe Check · Sidebar Preview</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  // Animate score ring counting up
+  let current = 0;
+  const target = 72;
+  const el = document.getElementById('scoreNum');
+  const interval = setInterval(() => {
+    current = Math.min(current + 2, target);
+    el.textContent = current;
+    if (current >= target) clearInterval(interval);
+  }, 18);
+
+  function showToast(msg, cls) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + cls;
+    setTimeout(() => { t.className = 'toast'; }, 2500);
+  }
+
+  function copyAndToast() {
+    showToast('✓ AI prompt copied to clipboard', 'success');
+  }
+
+  function copilotToast() {
+    showToast('Opening in Copilot Chat…', 'info');
+  }
+
+  function simulateScan() {
+    showToast('⏳ Scanning repository…', '');
+  }
+</script>
+</body>
+</html>

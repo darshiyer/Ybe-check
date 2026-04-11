@@ -5,6 +5,7 @@
 
 import { initializeStatusBar, disposeStatusBar } from './utils/statusBarUtils';
 import { executeScan, runEnvironmentHealthCheck } from './utils/scanUtils';
+import { SidebarProvider } from './sidebar/SidebarProvider';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -535,6 +536,28 @@ export function activate(context: vscode.ExtensionContext) {
             context.globalState.update(healthKey, true);
         });
     }
+
+    // ── Sidebar WebviewView ─────────────────────────────────────────
+    const sidebarProvider = new SidebarProvider(context);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            SidebarProvider.viewType,
+            sidebarProvider,
+            { webviewOptions: { retainContextWhenHidden: true } }
+        )
+    );
+
+    // Sidebar-specific commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ybe-check.runSidebarScan', () => sidebarProvider.runScan()),
+        vscode.commands.registerCommand('ybe-check.toggleAutoScan', () =>
+            vscode.window.showQuickPick(['Enable', 'Disable'], { title: 'Auto-Scan on Save' })
+                .then(sel => { if (sel) { sidebarProvider.runScan(); } })
+        ),
+        vscode.commands.registerCommand('ybe-check.exportReport', () =>
+            sidebarProvider.runScan()
+        ),
+    );
 
     // ── Scan commands ───────────────────────────────────────────────
     context.subscriptions.push(

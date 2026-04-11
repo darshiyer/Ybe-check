@@ -302,17 +302,3 @@ def scan(repo_path: str) -> dict:
             "details": [],
             "warning": f"Could not run test coverage scan: {e}"
         }
-
-    except Exception as e:
-        return {
-            "module": NAME,
-            "score": None,
-            "issues": [{
-                "type": "Module Error",
-                "severity": "HIGH",
-                "file": ".",
-                "line": None,
-                "description": f"Could not run test coverage scan: {e}",
-                "recommendation": "Check that the repo path is valid and accessible."
-            }]
-        }
