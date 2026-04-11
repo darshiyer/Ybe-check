@@ -75,19 +75,18 @@ export async function executeScan(
         title: "Ybe Check",
         cancellable: false
     }, async (progress) => {
-        const scanLabel = scanType === 'full' ? 'Full Audit' : 'Static Scan';
+        const scanLabel = 'Static Scan';
         progress.report({ message: `Running ${scanLabel} (this may take a moment)...` });
 
         // Write report to a temp file so we get clean JSON (no log noise)
         const tmpReport = path.join(os.tmpdir(), `ybe-report-${Date.now()}.json`);
 
         try {
-            const categoryFlag = scanType === 'static' ? '--categories static' : '';
             const cmd = [
                 `"${pythonPath}"`, '-m', 'ybe_check.cli', 'scan',
                 `"${targetPath}"`,
                 '--output', `"${tmpReport}"`,
-                categoryFlag,
+                '--categories', 'static',
             ].filter(Boolean).join(' ');
 
             await execAsync(cmd, { maxBuffer: MAX_BUFFER });

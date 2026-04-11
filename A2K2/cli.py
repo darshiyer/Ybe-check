@@ -18,21 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # ---------------------------------------------------------------------------
 # Module execution order
 # ---------------------------------------------------------------------------
-ALL_MODULES = [
-    "modules.secrets",
-    "modules.prompt_injection",
-    "modules.pii_logging",
-    "modules.dependencies",
-    "modules.auth_guards",
-    "modules.iac_security",
-    "modules.license_compliance",
-    "modules.ai_traceability",
-    "modules.test_coverage",
-    # Container & supply chain
-    "modules.container_scan",
-    "modules.sbom",
-    "modules.config_env",
-    # Dynamic modules — require a running target (set YBECK_TARGET_URL)
+DYNAMIC_MODULES = [
     "modules.load_testing",
     "modules.web_attacks",
     "modules.api_fuzzing",
@@ -43,12 +29,20 @@ STATIC_MODULES = [
     "modules.secrets",
     "modules.prompt_injection",
     "modules.pii_logging",
+    "modules.dependencies",
     "modules.auth_guards",
     "modules.iac_security",
     "modules.license_compliance",
     "modules.ai_traceability",
+    "modules.config_env",
     "modules.test_coverage",
 ]
+
+ALL_MODULES = STATIC_MODULES + [
+    # Container & supply chain
+    "modules.container_scan",
+    "modules.sbom",
+] + DYNAMIC_MODULES
 
 # ---------------------------------------------------------------------------
 # Module display names — maps module.NAME (or module import name) → display name
@@ -285,13 +279,16 @@ def determine_status(score, issues: int, warning: str = "") -> str:
 
 def load_modules(static_only: bool = False, dynamic_only: bool = False):
     """Dynamically import scan modules; skip silently if file doesn't exist."""
+    if static_only and dynamic_only:
+        raise ValueError("Cannot combine static_only and dynamic_only")
+
     if static_only:
         module_list = STATIC_MODULES
     elif dynamic_only:
-        # Dynamic = All modules not in Static (avoid duplicates)
-        module_list = [m for m in ALL_MODULES if m not in STATIC_MODULES]
+        module_list = DYNAMIC_MODULES
     else:
-        module_list = ALL_MODULES
+        # Default to static modules for safer local operation.
+        module_list = STATIC_MODULES
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     loaded = []
@@ -598,11 +595,11 @@ def main():
     )
     parser.add_argument(
         "--static", action="store_true",
-        help="Run static analysis only (skip network-dependent checks)"
+        help="Run static analysis only (default behavior)"
     )
     parser.add_argument(
         "--dynamic", action="store_true",
-        help="Run dynamic analysis only (skip source code checks)"
+        help="Run dynamic analysis only (opt-in)"
     )
     args = parser.parse_args()
 
@@ -623,7 +620,9 @@ def main():
         sys.exit(1)
 
     try:
-        report = run_scan(repo_path, static_only=args.static, dynamic_only=args.dynamic)
+        # Static-only is the default unless --dynamic is explicitly requested.
+        static_mode = args.static or not args.dynamic
+        report = run_scan(repo_path, static_only=static_mode, dynamic_only=args.dynamic)
         if args.json:
             print(json.dumps(report, indent=2))
         else:

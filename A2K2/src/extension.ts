@@ -529,7 +529,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Scan commands ───────────────────────────────────────────────
     context.subscriptions.push(
-        vscode.commands.registerCommand('ybe-check.fullScan', () => executeScan('full', context)),
+        // Static-only mode for now: route Full Scan to static execution.
+        vscode.commands.registerCommand('ybe-check.fullScan', () => executeScan('static', context)),
         vscode.commands.registerCommand('ybe-check.staticScan', () => executeScan('static', context)),
     );
 
