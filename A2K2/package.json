@@ -134,7 +134,9 @@
         "lint": "eslint src --ext ts",
         "test": "npm run compile",
         "package": "vsce package",
-        "publish": "vsce publish"
+        "package:rc": "vsce package --pre-release",
+        "publish": "vsce publish",
+        "publish:rc": "vsce publish --pre-release"
     },
     "devDependencies": {
         "@types/fs-extra": "^11.0.4",

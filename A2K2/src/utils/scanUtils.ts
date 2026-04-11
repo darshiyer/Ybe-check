@@ -35,6 +35,62 @@ async function checkPythonAvailable(pythonPath: string): Promise<boolean> {
     }
 }
 
+type RuntimeMode = 'module' | 'script';
+
+interface ScanRuntime {
+    mode: RuntimeMode;
+    scriptPath: string;
+}
+
+async function detectScanRuntime(pythonPath: string, context: vscode.ExtensionContext): Promise<ScanRuntime | null> {
+    const scriptPath = path.join(context.extensionPath, 'cli.py');
+    try {
+        await execAsync(`"${pythonPath}" -c "import ybe_check.cli"`, { timeout: 15_000 });
+        return { mode: 'module', scriptPath };
+    } catch {
+        if (fs.existsSync(scriptPath)) {
+            return { mode: 'script', scriptPath };
+        }
+        return null;
+    }
+}
+
+function parseJsonSafe(payload: string): any {
+    try {
+        return JSON.parse(payload);
+    } catch {
+        throw new Error('Ybe Check returned invalid JSON output.');
+    }
+}
+
+export async function runEnvironmentHealthCheck(
+    context: vscode.ExtensionContext,
+    options?: { notifyOnSuccess?: boolean }
+): Promise<boolean> {
+    const pythonPath = getPythonPath();
+    const hasPython = await checkPythonAvailable(pythonPath);
+    if (!hasPython) {
+        vscode.window.showWarningMessage(
+            'Ybe Check: Python 3 is not available. Set ybe-check.pythonPath or install Python.'
+        );
+        return false;
+    }
+
+    const runtime = await detectScanRuntime(pythonPath, context);
+    if (!runtime) {
+        vscode.window.showWarningMessage(
+            'Ybe Check: scanner runtime not found. Install package with "pip install ybe-check" or reinstall the extension.'
+        );
+        return false;
+    }
+
+    if (options?.notifyOnSuccess) {
+        const mode = runtime.mode === 'module' ? 'python package' : 'bundled script fallback';
+        vscode.window.showInformationMessage(`Ybe Check ready (${mode}).`);
+    }
+    return true;
+}
+
 /**
  * Executes a Ybe Check scan using `python3 -m ybe_check.cli scan`.
  * @param scanType - The type of scan to run: 'full' (Static + Dynamic) or 'static' (Static only).
@@ -64,6 +120,14 @@ export async function executeScan(
         return;
     }
 
+    const runtime = await detectScanRuntime(pythonPath, context);
+    if (!runtime) {
+        vscode.window.showErrorMessage(
+            'Ybe Check runtime is unavailable. Install with "pip install ybe-check" or reinstall extension files.'
+        );
+        return;
+    }
+
     const targetPath = workspaceFolders[0].uri.fsPath;
     setTargetPath(targetPath);
 
@@ -82,17 +146,25 @@ export async function executeScan(
         const tmpReport = path.join(os.tmpdir(), `ybe-report-${Date.now()}.json`);
 
         try {
-            const cmd = [
-                `"${pythonPath}"`, '-m', 'ybe_check.cli', 'scan',
-                `"${targetPath}"`,
-                '--output', `"${tmpReport}"`,
-                '--categories', 'static',
-            ].filter(Boolean).join(' ');
+            let report: any;
 
-            await execAsync(cmd, { maxBuffer: MAX_BUFFER });
-
-            const reportJson = fs.readFileSync(tmpReport, 'utf8');
-            const report = JSON.parse(reportJson);
+            if (runtime.mode === 'module') {
+                const cmd = [
+                    `"${pythonPath}"`, '-m', 'ybe_check.cli', 'scan',
+                    `"${targetPath}"`,
+                    '--output', `"${tmpReport}"`,
+                    '--categories', 'static',
+                ].join(' ');
+                await execAsync(cmd, { maxBuffer: MAX_BUFFER });
+                report = parseJsonSafe(fs.readFileSync(tmpReport, 'utf8'));
+            } else {
+                const cmd = [
+                    `"${pythonPath}"`, `"${runtime.scriptPath}"`, `"${targetPath}"`,
+                    '--json', '--static',
+                ].join(' ');
+                const { stdout } = await execAsync(cmd, { maxBuffer: MAX_BUFFER });
+                report = parseJsonSafe(stdout);
+            }
 
             logMessage(createSeparatorLogLine(`Ybe Check ${scanLabel} completed: Score ${report.overall_score}/100`), 'info');
 

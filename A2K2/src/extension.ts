@@ -4,7 +4,7 @@
  */
 
 import { initializeStatusBar, disposeStatusBar } from './utils/statusBarUtils';
-import { executeScan } from './utils/scanUtils';
+import { executeScan, runEnvironmentHealthCheck } from './utils/scanUtils';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -526,6 +526,15 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Status bar ──────────────────────────────────────────────────
     initializeStatusBar(context);
+
+    // ── One-time startup health check for runtime compatibility ─────
+    const pythonPath = getPythonPath();
+    const healthKey = `ybe_health_checked_${pythonPath}`;
+    if (!context.globalState.get<boolean>(healthKey)) {
+        runEnvironmentHealthCheck(context).finally(() => {
+            context.globalState.update(healthKey, true);
+        });
+    }
 
     // ── Scan commands ───────────────────────────────────────────────
     context.subscriptions.push(
