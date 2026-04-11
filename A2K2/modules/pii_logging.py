@@ -31,7 +31,13 @@ PII_PATTERNS = [
         "reason": "Hardcoded Indian phone number found — remove from source code"
     },
     {
-        "pattern": re.compile(r'\b\d{4}[\s-]\d{4}[\s-]\d{4}\b'),
+        # Aadhaar is exactly 12 digits in 3 groups of 4 (e.g. 1234 5678 9012).
+        # Two guards prevent false positives on 16-digit credit card numbers:
+        #   (?<!\d )(?<!\d-) — lookbehind: no preceding digit+separator (blocks
+        #                      matching inner groups of a 4-group CC number)
+        #   (?![\s-]\d)      — lookahead: no following separator+digit (blocks
+        #                      matching the first 12 digits of a CC number)
+        "pattern": re.compile(r'(?<!\d )(?<!\d-)\b\d{4}[\s-]\d{4}[\s-]\d{4}(?![\s-]\d)\b'),
         "type": "Hardcoded Aadhaar",
         "severity": "critical",
         "confidence": "high",

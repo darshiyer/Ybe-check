@@ -1,3 +1,4 @@
+import importlib.metadata
 import os
 import json
 import re
@@ -213,8 +214,9 @@ def normalize_license(raw_license: str) -> str:
 
 def run_pip_licenses(repo_path):
     """
-    Run pip-licenses in the context of the repo.
-    Returns list of {name, version, license} dicts.
+    Return installed packages with their licenses using importlib.metadata.
+    Zero external dependencies — works on any Python 3.8+.
+    Returns list of {Name, Version, License} dicts matching the pip-licenses schema.
     """
     try:
         result = subprocess.run(

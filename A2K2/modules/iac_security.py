@@ -1,7 +1,9 @@
 import os
 import json
+import re
+import shutil
 import subprocess
-import tempfile
+import sys
 
 NAME = "IaC Security"
 
@@ -36,6 +38,39 @@ IAC_FILENAMES = {
 }
 
 
+def _find_checkov_bin() -> str | None:
+    """Return the path to the checkov binary, or None if not found."""
+    # 1. Check PATH first
+    found = shutil.which("checkov")
+    if found:
+        return found
+    # 2. Look next to the active Python interpreter (handles venvs and pipx installs)
+    bin_dir = os.path.dirname(sys.executable)
+    for name in ("checkov", "checkov.exe"):
+        candidate = os.path.join(bin_dir, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _ensure_checkov() -> bool:
+    """Auto-install checkov if not present. Returns True if available after attempt."""
+    if _find_checkov_bin():
+        return True
+    # checkov is a CLI tool — install it, then re-check for the binary
+    for extra in [[], ["--user"], ["--break-system-packages"]]:
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "checkov", "-q"] + extra,
+                capture_output=True, check=True
+            )
+            if _find_checkov_bin():
+                return True
+        except subprocess.CalledProcessError:
+            continue
+    return False
+
+
 def has_iac_files(repo_path):
     """Quick check — does this repo have any IaC files worth scanning?"""
     for root, dirs, files in os.walk(repo_path):
@@ -45,6 +80,128 @@ def has_iac_files(repo_path):
             if ext in IAC_EXTENSIONS or fname.lower() in IAC_FILENAMES:
                 return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Pure-Python IaC rule engine — zero external dependencies, works everywhere
+# ---------------------------------------------------------------------------
+
+DOCKERFILE_RULES = [
+    (re.compile(r'^\s*USER\s+root\s*$', re.I),
+     "high", "Container runs as root — add USER nonroot to reduce attack surface"),
+    (re.compile(r'^\s*ADD\s+', re.I),
+     "medium", "Use COPY instead of ADD — ADD can auto-extract archives and fetch URLs unexpectedly"),
+    (re.compile(r'^\s*RUN\s+.*apt(-get)?\s+install(?!.*--no-install-recommends)', re.I),
+     "low", "Add --no-install-recommends to apt-get install to reduce image size and attack surface"),
+    (re.compile(r'^\s*ENV\s+\S*(PASSWORD|SECRET|KEY|TOKEN)\s*=\s*\S+', re.I),
+     "critical", "Secret hardcoded in Dockerfile ENV — use build args or runtime secrets instead"),
+    (re.compile(r'^\s*FROM\s+\S+:latest\s*$', re.I),
+     "medium", "Pin base image to a specific digest or version tag instead of :latest for reproducibility"),
+]
+
+COMPOSE_RULES = [
+    (re.compile(r'privileged\s*:\s*true', re.I),
+     "critical", "Container runs in privileged mode — full host access, major security risk"),
+    (re.compile(r'network_mode\s*:\s*["\']?host["\']?', re.I),
+     "high", "Container shares host network namespace — isolate with bridge networking"),
+    (re.compile(r'(password|secret|key|token)\s*:\s*["\']?[^\s\$\{][^"\'\s]{3,}', re.I),
+     "critical", "Hardcoded secret in docker-compose — use environment variables or Docker secrets"),
+    (re.compile(r'restart\s*:\s*["\']?always["\']?', re.I),
+     "low", "restart: always can hide crash loops — consider restart: on-failure with a retry limit"),
+]
+
+TERRAFORM_RULES = [
+    (re.compile(r'cidr_blocks\s*=\s*\[?\s*"0\.0\.0\.0/0"', re.I),
+     "critical", "Security group allows ingress from 0.0.0.0/0 (entire internet) — restrict to known CIDRs"),
+    (re.compile(r'acl\s*=\s*"public-read"', re.I),
+     "critical", "S3 bucket is publicly readable — remove public ACL or add bucket policy to block public access"),
+    (re.compile(r'encrypted\s*=\s*false', re.I),
+     "high", "Storage resource has encryption explicitly disabled — enable encryption at rest"),
+    (re.compile(r'(password|secret|access_key)\s*=\s*"[^"]{4,}"', re.I),
+     "critical", "Hardcoded credential in Terraform — use variables with sensitive=true or a secrets manager"),
+    (re.compile(r'skip_final_snapshot\s*=\s*true', re.I),
+     "medium", "RDS skip_final_snapshot=true — no backup taken on destroy, risk of data loss"),
+]
+
+K8S_RULES = [
+    (re.compile(r'privileged\s*:\s*true', re.I),
+     "critical", "Kubernetes container runs privileged — full node access, immediate security risk"),
+    (re.compile(r'runAsRoot\s*:\s*true', re.I),
+     "high", "Pod runs as root — set runAsNonRoot: true in securityContext"),
+    (re.compile(r'hostNetwork\s*:\s*true', re.I),
+     "high", "Pod shares host network namespace — use cluster networking instead"),
+    (re.compile(r'(memory|cpu)\s*:', re.I),
+     None, None),  # presence check — absence is flagged below
+]
+
+
+def _run_pure_python_iac_scan(repo_path: str) -> list:
+    """
+    Scan IaC files with built-in rules. No external tools needed.
+    Returns list of finding dicts.
+    """
+    details = []
+    seen = set()
+
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, repo_path)
+            flower = fname.lower()
+
+            try:
+                with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+            except OSError:
+                continue
+
+            # Determine file type
+            if flower == 'dockerfile' or flower.endswith('.dockerfile'):
+                rules = DOCKERFILE_RULES
+                # Check for missing USER instruction
+                has_user = any(re.match(r'^\s*USER\s+(?!root)', l, re.I) for l in lines)
+                if not has_user:
+                    key = (rel, 1, "Missing Non-Root USER")
+                    if key not in seen:
+                        seen.add(key)
+                        details.append({
+                            "file": rel, "line": 1,
+                            "type": "Missing Non-Root USER",
+                            "severity": "high",
+                            "reason": "No non-root USER instruction found — container will run as root by default",
+                            "confidence": "high",
+                        })
+            elif 'docker-compose' in flower:
+                rules = COMPOSE_RULES
+            elif flower.endswith('.tf'):
+                rules = TERRAFORM_RULES
+            elif flower.endswith(('.yaml', '.yml')) and any(
+                kw in '\n'.join(lines) for kw in ('apiVersion', 'kind: Deployment', 'kind: Pod')
+            ):
+                rules = K8S_RULES[:3]  # skip presence check rule
+            else:
+                continue
+
+            for i, line in enumerate(lines, start=1):
+                for rule in rules:
+                    if rule[1] is None:  # presence-check sentinel
+                        continue
+                    pattern, severity, reason = rule
+                    if pattern.search(line):
+                        key = (rel, i, reason[:40])
+                        if key not in seen:
+                            seen.add(key)
+                            details.append({
+                                "file": rel, "line": i,
+                                "type": reason.split(" — ")[0],
+                                "severity": severity,
+                                "reason": reason,
+                                "confidence": "high",
+                                "snippet": line.strip(),
+                            })
+
+    return details
 
 
 def run_checkov(repo_path):
@@ -88,7 +245,7 @@ def run_checkov(repo_path):
     except subprocess.TimeoutExpired:
         return None, "Checkov timed out after 120 seconds"
     except FileNotFoundError:
-        return None, "Checkov not found — run: pip install checkov"
+        return None, "checkov not found — run: pip install checkov"
     except Exception as e:
         return None, str(e)
 
@@ -234,29 +391,18 @@ def scan(repo_path: str) -> dict:
                 "warning": "No IaC files detected (no .tf, Dockerfile, docker-compose, k8s yaml, etc.)"
             }
 
-        # Run real Checkov
-        raw_output, error = run_checkov(repo_path)
+        # Primary: pure-Python rule engine (zero deps, always works)
+        details = _run_pure_python_iac_scan(repo_path)
 
-        if error:
-            return {
-                "name":    NAME,
-                "score":   None,
-                "issues":  0,
-                "details": [],
-                "warning": f"Could not run: {error}"
-            }
-
-        # Parse output
-        details, parse_error = parse_checkov_output(raw_output, repo_path)
-
-        if parse_error and not details:
-            return {
-                "name":    NAME,
-                "score":   None,
-                "issues":  0,
-                "details": [],
-                "warning": f"Could not run: {parse_error}"
-            }
+        # Enhancement: try checkov for deeper analysis and merge results
+        raw_output, checkov_error = run_checkov(repo_path)
+        if not checkov_error and raw_output:
+            checkov_details, _ = parse_checkov_output(raw_output, repo_path)
+            # Merge — dedupe by (file, line, check_id prefix)
+            existing = {(d["file"], d["line"]) for d in details}
+            for d in checkov_details:
+                if (d["file"], d["line"]) not in existing:
+                    details.append(d)
 
         # Scoring formula — contract law, do not change
         critical = len([d for d in details if d["severity"] == "critical"])

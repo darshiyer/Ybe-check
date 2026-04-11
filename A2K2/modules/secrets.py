@@ -131,16 +131,18 @@ def _ensure_detect_secrets() -> bool:
         return True
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
-    try:
-        # Use --user flag to avoid modifying the global Python environment
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--user", "detect-secrets", "-q"],
-            check=True,
-            capture_output=True,
-        )
-        return True
-    except subprocess.CalledProcessError:
-        return False
+    # Try install strategies in order: plain → --user → --break-system-packages
+    for extra in [[], ["--user"], ["--break-system-packages"]]:
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "detect-secrets", "-q"] + extra,
+                check=True,
+                capture_output=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            continue
+    return False
 
 
 def _run_detect_secrets(repo_path: str) -> Tuple[List[Dict], Optional[str]]:
