@@ -413,6 +413,99 @@ Please:
 
 
 # =====================================================================
+# TOOL 8: ybe.resolve_finding   (NEW – mark findings in the store)
+# =====================================================================
+
+@mcp.tool(name="ybe.resolve_finding")
+def resolve_finding(
+    path: str,
+    finding_id: str,
+    status: str = "fixed",
+) -> str:
+    """Mark a finding as fixed or ignored in the persistent security store.
+
+    After the AI agent fixes a security issue, call this to update the
+    sidebar feed so the user sees it as resolved.
+
+    Args:
+        path: Path to the repository root.
+        finding_id: The finding ID (12-char hash from the store).
+        status: New status — "fixed", "ignored", or "open".
+    """
+    if status not in ("fixed", "ignored", "open"):
+        return json.dumps({"error": f"Invalid status '{status}'. Use 'fixed', 'ignored', or 'open'."})
+
+    store_path = Path(path) / ".ybe-check" / "store.json"
+    if not store_path.exists():
+        return json.dumps({"error": "No store found. Run a scan first."})
+
+    try:
+        store = json.loads(store_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        return json.dumps({"error": f"Failed to read store: {e}"})
+
+    findings = store.get("findings", [])
+    match = next((f for f in findings if f.get("id") == finding_id), None)
+
+    if not match:
+        return json.dumps({"error": f"Finding '{finding_id}' not found in store."})
+
+    old_status = match.get("status", "open")
+    match["status"] = status
+
+    try:
+        store_path.write_text(json.dumps(store, indent=2), encoding="utf-8")
+    except OSError as e:
+        return json.dumps({"error": f"Failed to write store: {e}"})
+
+    return json.dumps({
+        "finding_id": finding_id,
+        "old_status": old_status,
+        "new_status": status,
+        "type": match.get("type", ""),
+        "file": match.get("file", ""),
+    }, indent=2)
+
+
+# =====================================================================
+# TOOL 9: ybe.check_fix_queue   (sidebar → agent communication)
+# =====================================================================
+
+@mcp.tool(name="ybe.check_fix_queue")
+def check_fix_queue(
+    path: str,
+) -> str:
+    """Check if the user requested a fix from the sidebar.
+
+    When a user clicks 'Fix with AI' in the Ybe Check sidebar, the fix
+    request is written to .ybe-check/fix-queue.json. Call this tool to
+    retrieve and act on it. Returns the finding details and a fix prompt,
+    or null if no pending request.
+
+    After fixing, call ybe.resolve_finding to mark it done.
+
+    Args:
+        path: Path to the repository root.
+    """
+    queue_path = Path(path) / ".ybe-check" / "fix-queue.json"
+    if not queue_path.exists():
+        return json.dumps({"pending": False})
+
+    try:
+        request = json.loads(queue_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return json.dumps({"pending": False})
+
+    # Clear the queue after reading
+    try:
+        queue_path.unlink()
+    except OSError:
+        pass
+
+    return json.dumps({"pending": True, "fix_request": request}, indent=2)
+
+
+# =====================================================================
 # MCP PROMPT TEMPLATES — appear in Copilot / Cursor prompt picker
 # =====================================================================
 
