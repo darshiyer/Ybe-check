@@ -1,8 +1,8 @@
-# Ybe Check 🛡️
+# Ybe Check
 
-**Production-readiness security gatekeeper for vibe-coded apps.**
+**Security scanner for AI-generated code.**
 
-16 scan modules · AI remediation · MCP server · VS Code + Copilot integration · Bento dashboard
+10 scan modules · MCP server · VS Code extension · Web dashboard
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -16,12 +16,11 @@ In the age of AI-assisted development, code is generated faster than it can be a
 
 ## ✨ Key Features
 
-- **16 Scan Modules** — Secrets, Prompt Injection, PII, Dependencies, Auth Guards, IaC, License, AI Traceability, Test Coverage, Container Scan, SBOM, Config, Load Testing, Web Attacks, API Fuzzing, Live Prompt Testing
+- **10 Static Scan Modules** — Secrets, Prompt Injection, PII, Dependencies, Auth Guards, IaC, License, AI Traceability, Test Coverage, Config/Env
 - **MCP Server** — 7 tools + 3 prompt templates for AI coding assistants (Copilot, Cursor, Claude)
-- **VS Code Extension** — Auto-installs MCP, 13 commands, bento grid webview dashboard
-- **Copilot Integration** — High-quality security prompts with CWE references and severity icons
-- **AI Remediation** — Blackbox AI → Gemini → static fallback chain
-- **Bento Dashboard** — Aurora hero, persona cards, module bars, findings drill-down
+- **VS Code Extension** — Sidebar panel with scan results, per-module scores, one-click AI fix prompts
+- **Web Dashboard** — Scan results, findings drill-down, export
+- **4 Advanced Dynamic Modules** — Load Testing, Web Attacks, API Fuzzing, Live Prompt Testing (require external tools)
 
 ## 🛠️ Scan Modules (16 Pillars)
 
@@ -87,7 +86,7 @@ The extension activates on startup and:
 
 | Command | What it does |
 |---------|-------------|
-| `Ybe Check: Full Audit` | Run all 16 modules |
+| `Ybe Check: Full Audit` | Run all scan modules |
 | `Ybe Check: Static Scan` | Run static modules only |
 | `Ybe Check: Security Audit` | Send full report to Copilot |
 | `Ybe Check: Fix Finding with Copilot` | Fix a specific finding |

@@ -1,12 +1,12 @@
 {
   "name": "ybe-check",
   "displayName": "Ybe Check",
-  "description": "Production-readiness security gatekeeper for vibe-coded apps \u2014 16 scan modules, AI remediation, MCP server, Copilot integration",
+  "description": "Security scanner for AI-generated code \u2014 10 scan modules, MCP server, VS Code sidebar",
   "version": "1.0.0",
   "publisher": "YbeCheck",
   "icon": "icon.png",
   "engines": {
-    "vscode": "^1.99.0"
+    "vscode": "^1.74.0"
   },
   "main": "./out/extension.js",
   "categories": [
@@ -147,7 +147,7 @@
         {
           "id": "ybe-check-sidebar",
           "title": "Ybe Check",
-          "icon": "$(shield)"
+          "icon": "media/shield.svg"
         }
       ]
     },
@@ -157,7 +157,7 @@
           "type": "webview",
           "id": "ybeCheck.sidebar",
           "name": "Security Scanner",
-          "icon": "$(shield)",
+          "icon": "media/shield.svg",
           "contextualTitle": "Ybe Check"
         }
       ]
