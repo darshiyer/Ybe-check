@@ -29,7 +29,9 @@ from typing import Optional
 NAME = "Config & Env"
 
 SKIP_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv',
-             'dist', 'build', '.next', 'out', '.ybe-check'}
+             'dist', 'build', '.next', 'out', '.ybe-check',
+             'site-packages', '.antigravity', '.cursor', '.claude',
+             'graphify-out', '.terraform'}
 
 # Files that are "example / template" — must NOT contain real secrets
 EXAMPLE_FILES = {

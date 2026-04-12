@@ -5,7 +5,10 @@ NAME = "Prompt Injection"
 
 SKIP_DIRS = {
     '.git', 'node_modules', '__pycache__', '.venv',
-    'venv', 'dist', 'build', '.next', 'out'
+    'venv', 'dist', 'build', '.next', 'out', 'env',
+    'site-packages', '.antigravity', '.cursor', '.claude',
+    '.ybe-check', '.tox', '.mypy_cache', '.pytest_cache',
+    'graphify-out', '.terraform',
 }
 SKIP_EXTENSIONS = {
     '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico',

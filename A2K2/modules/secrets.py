@@ -21,6 +21,8 @@ SKIP_DIRS: Set[str] = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", ".next",
     ".ybe-check", ".secret-stack", ".eggs", "*.egg-info",
+    "site-packages", ".antigravity", ".cursor", ".claude",
+    "graphify-out", "coverage_html", ".terraform",
 }
 
 SKIP_EXTENSIONS: Set[str] = {
@@ -171,6 +173,10 @@ def _run_detect_secrets(repo_path: str) -> Tuple[List[Dict], Optional[str]]:
             rel = os.path.relpath(filename, repo_path)
         except ValueError:
             rel = filename
+        # Filter out findings from skipped directories
+        parts = rel.replace("\\", "/").split("/")
+        if any(p in SKIP_DIRS for p in parts):
+            continue
         for item in findings:
             details.append({
                 "file": rel,

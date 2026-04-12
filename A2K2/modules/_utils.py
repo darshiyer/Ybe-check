@@ -12,6 +12,8 @@ SKIP_DIRS: Set[str] = {
     'venv', 'env', 'dist', 'build', '.next', 'out',
     '.tox', '.mypy_cache', '.pytest_cache',
     '.ybe-check', '.secret-stack', '.eggs', '*.egg-info',
+    'site-packages', '.antigravity', '.cursor', '.claude',
+    'graphify-out', '.terraform',
 }
 
 # ── COMMON SKIP EXTENSIONS (binary/non-text files) ───────────

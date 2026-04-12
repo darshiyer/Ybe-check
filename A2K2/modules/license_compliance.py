@@ -73,7 +73,6 @@ KNOWN_NPM_LICENSES = {
     "apollo-server":    ("MIT",          "low"),
     "typeorm":          ("MIT",          "low"),
     "mikro-orm":        ("MIT",          "low"),
-    "some-hallucinated-npm-package": (None, "unknown"),
 }
 
 # ---------------------------------------------------------------------------
@@ -261,7 +260,9 @@ def find_dependency_files(repo_path):
     }
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in {
-            '.git', 'node_modules', '__pycache__', '.venv', 'venv'
+            '.git', 'node_modules', '__pycache__', '.venv', 'venv',
+            'site-packages', '.antigravity', '.cursor', '.claude',
+            '.ybe-check', 'graphify-out', '.terraform',
         }]
         for fname in files:
             if fname in targets:

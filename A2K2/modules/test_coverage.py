@@ -18,7 +18,9 @@ NAME = "test_coverage"
 
 SKIP_DIRS = {
     '.git', 'node_modules', '__pycache__', '.venv',
-    'venv', 'dist', 'build', '.next', 'out'
+    'venv', 'dist', 'build', '.next', 'out',
+    'site-packages', '.antigravity', '.cursor', '.claude',
+    '.ybe-check', 'graphify-out', '.terraform',
 }
 
 # ── DETECTION CONSTANTS ──────────────────────────────────────
