@@ -586,6 +586,95 @@ def format_plain_text(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _persist_to_store(repo_path: str, report: dict) -> None:
+    """Write scan results to .ybe-check/store.json for the sidebar feed."""
+    import hashlib
+
+    store_dir = os.path.join(repo_path, ".ybe-check")
+    store_path = os.path.join(store_dir, "store.json")
+
+    # Load existing store
+    store = {"version": 1, "lastScan": None, "currentScore": None,
+             "currentVerdict": "", "findings": [], "history": []}
+    try:
+        with open(store_path, "r") as f:
+            loaded = json.load(f)
+            if loaded.get("version") == 1:
+                store = loaded
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    now = datetime.now(timezone.utc).isoformat()
+    modules = report.get("modules", [])
+
+    # Build incoming findings
+    current_ids = set()
+    incoming = []
+    for mod in modules:
+        for d in mod.get("details", []):
+            raw = f"{mod['name']}::{d.get('type', '')}::{d.get('file', '')}::{d.get('line', 0)}"
+            fid = hashlib.sha256(raw.encode()).hexdigest()[:12]
+            current_ids.add(fid)
+            incoming.append({
+                "id": fid,
+                "module": mod["name"],
+                "severity": (d.get("severity") or "medium").lower(),
+                "type": d.get("type", "Security issue"),
+                "file": d.get("file", ""),
+                "line": d.get("line", 0),
+                "reason": d.get("reason", ""),
+                "snippet": d.get("snippet", ""),
+                "remediation": d.get("remediation") or d.get("action", ""),
+                "rule_id": d.get("rule_id", ""),
+                "status": "open",
+                "firstSeen": now,
+                "lastSeen": now,
+                "isNew": True,
+                "scanCount": 1,
+            })
+
+    # Merge with existing
+    existing_by_id = {f["id"]: f for f in store.get("findings", [])}
+    merged = []
+    for inc in incoming:
+        ex = existing_by_id.pop(inc["id"], None)
+        if ex:
+            ex["lastSeen"] = now
+            ex["scanCount"] = ex.get("scanCount", 0) + 1
+            ex["isNew"] = False
+            if ex.get("status") == "fixed":
+                ex["status"] = "open"
+                ex["isNew"] = True
+            merged.append(ex)
+        else:
+            merged.append(inc)
+
+    for old in existing_by_id.values():
+        old["isNew"] = False
+        merged.append(old)
+
+    # Update store
+    store["lastScan"] = now
+    store["currentScore"] = report.get("overall_score")
+    store["currentVerdict"] = report.get("verdict", "")
+    store["findings"] = merged
+
+    history = store.get("history", [])
+    history.append({
+        "timestamp": now,
+        "score": report.get("overall_score"),
+        "verdict": report.get("verdict", ""),
+        "modulesRun": len(modules),
+        "findingsFound": len(incoming),
+    })
+    store["history"] = history[-50:]
+
+    # Write
+    os.makedirs(store_dir, exist_ok=True)
+    with open(store_path, "w") as f:
+        json.dump(store, f, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ybe Check CLI")
     parser.add_argument("repo_path", help="Path to repo to scan")
@@ -623,6 +712,10 @@ def main():
         # Static-only is the default unless --dynamic is explicitly requested.
         static_mode = args.static or not args.dynamic
         report = run_scan(repo_path, static_only=static_mode, dynamic_only=args.dynamic)
+
+        # Persist to .ybe-check/store.json for the sidebar feed
+        _persist_to_store(repo_path, report)
+
         if args.json:
             print(json.dumps(report, indent=2))
         else:
