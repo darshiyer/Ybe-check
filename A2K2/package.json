@@ -160,7 +160,27 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "ybe-check.runSidebarScan",
+        "key": "ctrl+shift+y",
+        "mac": "cmd+shift+y",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "command": "ybe-check.staticScan",
+        "key": "ctrl+shift+alt+y",
+        "mac": "cmd+shift+alt+y",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "command": "ybe-check.openDashboard",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "workspaceFolderCount > 0"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",
