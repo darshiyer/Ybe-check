@@ -242,23 +242,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             fs.writeFileSync(queuePath, JSON.stringify(request, null, 2), 'utf-8');
         }
 
-        // Also copy to clipboard as fallback
+        // Send directly to Claude Code — it accepts initialPrompt as 2nd arg
+        try {
+            await vscode.commands.executeCommand('claude-vscode.editor.open', undefined, prompt);
+            this._view?.webview.postMessage({ type: 'toast', text: 'Sent to Claude', style: 'ok' });
+            return;
+        } catch { /* Claude Code not available */ }
+
+        // Try Copilot chat with query param
+        try {
+            await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
+            this._view?.webview.postMessage({ type: 'toast', text: 'Sent to Copilot', style: 'ok' });
+            return;
+        } catch { /* Copilot not available */ }
+
+        // Fallback: clipboard
         await vscode.env.clipboard.writeText(prompt);
-
-        // Open the AI agent's panel
-        const chatCommands = [
-            'claude-vscode.sidebar.open',
-            'workbench.panel.chat.view.copilot.focus',
-            'workbench.action.chat.open',
-        ];
-        for (const cmd of chatCommands) {
-            try {
-                await vscode.commands.executeCommand(cmd);
-                break;
-            } catch { /* try next */ }
-        }
-
-        this._view?.webview.postMessage({ type: 'toast', text: 'Fix request sent to agent', style: 'ok' });
+        try { await vscode.commands.executeCommand('claude-vscode.sidebar.open'); } catch {}
+        this._view?.webview.postMessage({ type: 'toast', text: 'Prompt copied — Cmd+V', style: 'ok' });
     }
 
     private _handleSetStatus(findingId: string, status: FindingStatus): void {
