@@ -153,17 +153,46 @@ def _ensure_detect_secrets() -> bool:
     return False
 
 
+_DS_TIMEOUT = 45  # seconds — prevents hanging on large repos
+
+# Directories and file extensions that detect-secrets should skip.
+# Binary, generated, and package directories never contain real secrets.
+_DS_EXCLUDE_DIRS = [
+    "node_modules", ".git", "__pycache__", ".venv", "venv", "env",
+    "dist", "build", "out", ".next", "graphify-out", "coverage",
+]
+_DS_EXCLUDE_EXTS = [
+    ".vsix", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf", ".pdf",
+    ".zip", ".tar", ".gz", ".bin", ".pyc", ".map",
+]
+
+
 def _run_detect_secrets(repo_path: str) -> Tuple[List[Dict], Optional[str]]:
     """Returns (details, warning_or_none)."""
     if not _ensure_detect_secrets():
         return [], "Could not install detect-secrets. Run: pip install detect-secrets"
+
+    # Build exclude flags so detect-secrets skips binary/generated paths
+    exclude_args: List[str] = []
+    exclude_pattern = "|".join(
+        [rf"(^|/){d}(/|$)" for d in _DS_EXCLUDE_DIRS] +
+        [rf"\.{ext.lstrip('.')}$" for ext in _DS_EXCLUDE_EXTS]
+    )
+    if exclude_pattern:
+        exclude_args = ["--exclude-files", exclude_pattern]
+
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "detect_secrets", "scan", "--all-files", repo_path],
+            [sys.executable, "-m", "detect_secrets", "scan", "--all-files", repo_path]
+            + exclude_args,
             capture_output=True,
             text=True,
             check=False,
+            timeout=_DS_TIMEOUT,
         )
+    except subprocess.TimeoutExpired:
+        return [], f"detect-secrets timed out after {_DS_TIMEOUT}s — repo may be too large"
     except FileNotFoundError:
         return [], "detect-secrets not found after install attempt"
     if result.returncode != 0 and not result.stdout:
