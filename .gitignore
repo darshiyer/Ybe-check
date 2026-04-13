@@ -10,3 +10,23 @@ __pycache__/
 .mcpregistry_github_token
 .mcpregistry_registry_token
 ybe-report.json
+
+# Build artifacts
+*.vsix
+dist/
+build/
+
+# Knowledge graph output (generated — do not commit)
+graphify-out/
+
+# Python virtualenvs
+.venv/
+venv/
+env/
+
+# Scan cache
+.ybe-cache/
+*.ybe-report.json
+
+# OS
+Thumbs.db
