@@ -28,6 +28,8 @@ from typing import Optional
 
 NAME = "Config & Env"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 SKIP_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv',
              'dist', 'build', '.next', 'out', '.ybe-check',
              'site-packages', '.antigravity', '.cursor', '.claude',
@@ -179,6 +181,9 @@ def find_env_files(repo_path: str) -> dict[str, str]:
     for search_dir in search_dirs:
         for dirpath, dirnames, filenames in os.walk(search_dir):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            _real = os.path.realpath(dirpath)
+            if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+                dirnames.clear(); continue
             for fname in filenames:
                 lower = fname.lower()
                 if lower in ALL_ENV_PATTERNS or lower.startswith(".env"):

@@ -16,6 +16,8 @@ import json
 
 NAME = "test_coverage"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 SKIP_DIRS = {
     '.git', 'node_modules', '__pycache__', '.venv',
     'venv', 'dist', 'build', '.next', 'out',
@@ -136,6 +138,9 @@ def scan(repo_path: str) -> dict:
 
         for root, dirs, files in os.walk(repo_path):
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+            _real = os.path.realpath(root)
+            if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+                dirs.clear(); continue
 
             # Check for test directories
             rel_root = os.path.relpath(root, repo_path)

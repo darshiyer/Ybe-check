@@ -24,6 +24,8 @@ from typing import Optional
 
 NAME = "Container Scan"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 SKIP_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv',
              'dist', 'build', '.next', 'out', '.ybe-check'}
 
@@ -53,6 +55,9 @@ def find_dockerfiles(repo_path: str) -> list[str]:
     found = []
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        _real = os.path.realpath(dirpath)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirnames.clear(); continue
         for fname in filenames:
             lower = fname.lower()
             if (lower == "dockerfile"
@@ -75,6 +80,9 @@ def extract_image_names(repo_path: str) -> list[str]:
 
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        _real = os.path.realpath(dirpath)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirnames.clear(); continue
         for fname in filenames:
             lower = fname.lower()
             fpath = os.path.join(dirpath, fname)

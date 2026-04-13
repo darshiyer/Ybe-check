@@ -6,6 +6,22 @@ Eliminates code duplication across secrets, prompt_injection, pii_logging, and a
 import os
 from typing import List, Optional, Set
 
+# ── SCANNER SELF-AWARENESS ───────────────────────────────────
+# Absolute path of the modules/ directory — used to skip scanning
+# the scanner's own source code (prevents ironic false positives).
+SCANNER_MODULES_DIR: str = os.path.dirname(os.path.abspath(__file__))
+SCANNER_ROOT_DIR: str = os.path.dirname(SCANNER_MODULES_DIR)  # extension root
+
+
+def is_scanner_file(fpath: str) -> bool:
+    """Return True if fpath is part of the scanner's own source tree."""
+    try:
+        real = os.path.realpath(fpath)
+        return real.startswith(SCANNER_ROOT_DIR + os.sep) or real == SCANNER_ROOT_DIR
+    except (OSError, ValueError):
+        return False
+
+
 # ── COMMON SKIP DIRECTORIES ──────────────────────────────────
 SKIP_DIRS: Set[str] = {
     '.git', 'node_modules', '__pycache__', '.venv',
@@ -34,7 +50,8 @@ MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB
 def walk_files(repo_path: str, extensions: Set[str]) -> List[str]:
     """
     Walk a repository directory yielding file paths matching given extensions.
-    Skips ignored directories, binary extensions, symlinks, and oversized files.
+    Skips ignored directories, binary extensions, symlinks, oversized files,
+    and the scanner's own source tree.
 
     Args:
         repo_path: Root directory to walk.
@@ -46,6 +63,11 @@ def walk_files(repo_path: str, extensions: Set[str]) -> List[str]:
     files = []
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        # Skip the scanner's own directory tree
+        _real = os.path.realpath(dirpath)
+        if _real == SCANNER_ROOT_DIR or _real.startswith(SCANNER_ROOT_DIR + os.sep):
+            dirnames.clear()
+            continue
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext not in extensions or ext in SKIP_EXTENSIONS:

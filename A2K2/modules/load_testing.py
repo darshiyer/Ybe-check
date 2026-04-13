@@ -17,6 +17,8 @@ from typing import Optional
 
 NAME = "Load Testing"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # ── TARGET URL RESOLUTION ────────────────────────────────────────────────────
 
 ENV_KEYS = ["BASE_URL", "API_URL", "APP_URL", "NEXT_PUBLIC_API_URL",
@@ -116,6 +118,9 @@ def discover_endpoints(repo_path: str) -> list[str]:
 
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in skip]
+        _real = os.path.realpath(dirpath)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirnames.clear(); continue
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext not in CODE_EXTENSIONS:

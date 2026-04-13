@@ -15,6 +15,8 @@ import re
 
 NAME = "ai_traceability"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # ── SKIP RULES ───────────────────────────────────────────────
 
 SKIP_DIRS = {
@@ -84,6 +86,9 @@ def walk_files(repo_path):
     """Walk repo yielding code files, skipping ignored dirs."""
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        _real = os.path.realpath(root)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirs.clear(); continue
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
             if ext in SCAN_EXTENSIONS:

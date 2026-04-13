@@ -7,6 +7,8 @@ import sys
 
 NAME = "IaC Security"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 SKIP_DIRS = {
     '.git', 'node_modules', '__pycache__', '.venv',
     'venv', 'dist', 'build', '.next', 'out',
@@ -77,6 +79,9 @@ def has_iac_files(repo_path):
     """Quick check — does this repo have any IaC files worth scanning?"""
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        _real = os.path.realpath(root)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirs.clear(); continue
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
             if ext in IAC_EXTENSIONS or fname.lower() in IAC_FILENAMES:
@@ -147,6 +152,9 @@ def _run_pure_python_iac_scan(repo_path: str) -> list:
 
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        _real = os.path.realpath(root)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirs.clear(); continue
         for fname in files:
             fpath = os.path.join(root, fname)
             rel = os.path.relpath(fpath, repo_path)

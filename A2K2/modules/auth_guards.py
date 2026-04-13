@@ -22,6 +22,8 @@ import re
 
 NAME = "Auth Guards"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 SKIP_DIRS = {
     '.git', 'node_modules', '__pycache__', '.venv',
     'venv', 'dist', 'build', '.next', 'out',
@@ -98,6 +100,9 @@ def walk_files(repo_path, extensions):
     """Walk repo yielding files matching given extensions, skipping ignored dirs & binary extensions."""
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        _real = os.path.realpath(root)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirs.clear(); continue
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
             if ext in extensions and ext not in SKIP_EXTENSIONS:

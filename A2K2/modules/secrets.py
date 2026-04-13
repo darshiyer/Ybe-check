@@ -13,6 +13,9 @@ from typing import Dict, List, Optional, Set, Tuple
 
 NAME = "Secrets Detection"
 
+# Self-exclusion: don't scan the scanner's own source tree
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # ---------------------------------------------------------------------------
 # File walk (shared within this module)
 # ---------------------------------------------------------------------------
@@ -90,6 +93,9 @@ def _walk_files(root: str) -> List[str]:
     files = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        _real = os.path.realpath(dirpath)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirnames.clear(); continue
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext in SKIP_EXTENSIONS:

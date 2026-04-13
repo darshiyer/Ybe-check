@@ -127,6 +127,8 @@ LLM_KEY_PATTERNS = {
 ENV_FILES = [".env", ".env.local", ".env.example", ".env.development",
              ".env.production", "config.env", "secrets.env"]
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 SKIP_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv',
              'dist', 'build', '.next', 'out', '.ybe-check'}
 
@@ -165,6 +167,9 @@ def discover_llm_config(repo_path: str) -> dict:
     scan_dirs = [repo_path]
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        _real = os.path.realpath(dirpath)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirnames.clear(); continue
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext not in {".env", ".py", ".js", ".ts", ".yaml", ".yml", ".toml", ""}:
@@ -398,6 +403,9 @@ def static_scan_prompts(repo_path: str) -> list[dict]:
 
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        _real = os.path.realpath(dirpath)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirnames.clear(); continue
         for fname in filenames:
             if os.path.splitext(fname)[1].lower() not in code_exts:
                 continue

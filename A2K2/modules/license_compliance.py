@@ -7,6 +7,8 @@ import sys
 
 NAME = "License Compliance"
 
+_SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # ---------------------------------------------------------------------------
 # Known npm package licenses — avoids running pip-licenses against npm deps.
 # All entries are well-known permissive packages (severity "low" or "medium").
@@ -264,6 +266,9 @@ def find_dependency_files(repo_path):
             'site-packages', '.antigravity', '.cursor', '.claude',
             '.ybe-check', 'graphify-out', '.terraform',
         }]
+        _real = os.path.realpath(root)
+        if _real == _SCANNER_ROOT or _real.startswith(_SCANNER_ROOT + os.sep):
+            dirs.clear(); continue
         for fname in files:
             if fname in targets:
                 dep_files.append(os.path.join(root, fname))
