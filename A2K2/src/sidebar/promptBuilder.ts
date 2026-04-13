@@ -34,26 +34,37 @@ const SEV_RISK: Record<string, string> = {
     low:      'This is a low severity issue. Address it as part of your next security hardening pass.',
 };
 
+/** Sanitise a string field — trims, collapses whitespace, caps length. */
+function clean(val: unknown, max = 500): string {
+    if (val === null || val === undefined) { return ''; }
+    return String(val).replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
 /**
  * Build a detailed AI fix prompt for a single finding.
+ * Handles null/undefined fields gracefully — never throws.
  */
 export function buildAiPrompt(
-    finding: Finding,
+    finding: Finding | null | undefined,
     moduleName: string,
     repoPath: string
 ): string {
-    const sev        = (finding.severity || 'medium').toLowerCase();
+    if (!finding) {
+        return `🛡️ Ybe Check — ${moduleName}\nNo finding details available.`;
+    }
+
+    const sev        = clean(finding.severity || 'medium').toLowerCase();
     const sevUpper   = sev.toUpperCase();
     const emoji      = SEV_EMOJI[sev] || '⚠️';
-    const file       = finding.file || 'unknown file';
+    const file       = clean(finding.file) || 'unknown file';
     const line       = finding.line ?? '?';
-    const type       = finding.type || 'Security Issue';
-    const reason     = finding.reason || finding.description || '';
-    const remediation = finding.remediation || finding.action || '';
-    const snippet    = finding.snippet || '';
-    const ruleId     = finding.rule_id ? `[${finding.rule_id}] ` : '';
-    const confidence = finding.confidence ? ` · Confidence: ${finding.confidence}` : '';
-    const riskNote   = SEV_RISK[sev] || '';
+    const type       = clean(finding.type) || 'Security Issue';
+    const reason     = clean(finding.reason || finding.description, 800);
+    const remediation = clean(finding.remediation || finding.action, 800);
+    const snippet    = clean(finding.snippet, 400);
+    const ruleId     = finding.rule_id ? `[${clean(finding.rule_id)}] ` : '';
+    const confidence = finding.confidence ? ` · Confidence: ${clean(finding.confidence)}` : '';
+    const riskNote   = SEV_RISK[sev] || 'Review and address this issue before deploying.';
 
     const lines: string[] = [];
 
