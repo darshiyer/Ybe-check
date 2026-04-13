@@ -142,6 +142,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const python = getPythonPath();
         const cli    = getCLIPath(this._context);
 
+        // Cycle through module names in the panel during the scan so the
+        // user sees progress rather than a static spinner.
+        const MODULE_LABELS = [
+            'Secrets Detection', 'Prompt Injection', 'PII & Logging',
+            'Auth Guards', 'IaC Security', 'License Compliance',
+            'Test Coverage', 'AI Traceability', 'Config & Env', 'Dependencies',
+        ];
+        let labelIdx = 0;
+        const progressTimer = setInterval(() => {
+            this._data = {
+                ...this._data,
+                scanningModule: `Scanning ${MODULE_LABELS[labelIdx % MODULE_LABELS.length]}…`,
+            };
+            this._render();
+            labelIdx++;
+        }, 1800);
+
         try {
             await execAsync(
                 `"${python}" "${cli}" "${root}" --static --json`,
@@ -154,6 +171,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             // Even on error, CLI may have written partial results
             this._store?.reload();
         } finally {
+            clearInterval(progressTimer);
             this._scanning = false;
             this._render();
         }
