@@ -36,6 +36,7 @@ STATIC_MODULES = [
     "modules.ai_traceability",
     "modules.config_env",
     "modules.test_coverage",
+    "modules.code_quality",
 ]
 
 ALL_MODULES = STATIC_MODULES + [
@@ -57,6 +58,7 @@ MODULE_DISPLAY_NAMES = {
     "modules.license_compliance":"License Compliance",
     "modules.ai_traceability":   "AI Traceability",
     "modules.test_coverage":     "Test & Coverage",
+    "modules.code_quality":      "Code Quality",
     # New modules from v1.1
     "modules.container_scan":    "Container Security",
     "modules.sbom":              "SBOM",
@@ -80,6 +82,7 @@ MODULE_WEIGHTS = {
     "License Compliance":  0.05,
     "AI Traceability":     0.03,
     "Test & Coverage":     0.02,
+    "Code Quality":        0.08,
     # New modules — lower weights until battle-tested
     "Container Security":  0.06,
     "SBOM":                0.04,
@@ -104,6 +107,7 @@ RULE_PREFIXES = {
     "License Compliance":  "YBC-LIC",
     "AI Traceability":     "YBC-AIT",
     "Test & Coverage":     "YBC-TST",
+    "Code Quality":        "YBC-CQA",
     "Container Security":  "YBC-CON",
     "SBOM":                "YBC-SBM",
     "Config & Env":        "YBC-CFG",
@@ -235,11 +239,36 @@ def build_action(detail: dict, finding_type: str) -> str:
 
 
 def add_confidence(detail: dict) -> dict:
-    """Return a new dict with 'confidence' field set based on severity."""
+    """Return a new dict with 'confidence' field derived from context signals."""
     if "confidence" in detail:
         return detail
+    # Context-aware confidence scoring:
+    # 1. Check if the file path suggests a test/fixture/example (lower confidence)
+    fpath = (detail.get("file") or "").lower()
+    low_conf_segments = {
+        'test', 'tests', '__tests__', 'spec', 'fixture', 'fixtures',
+        'mock', 'mocks', 'example', 'examples', 'sample', 'demo',
+        'testdata', 'test_data',
+    }
+    test_affixes = ('test-', 'test_', '-test', '_test')
+    path_parts = fpath.replace('\\', '/').split('/')
+    for part in path_parts:
+        if part in low_conf_segments:
+            return {**detail, "confidence": "low"}
+        for affix in test_affixes:
+            if part.startswith(affix) or part.endswith(affix):
+                return {**detail, "confidence": "low"}
+    # 2. Certain finding types are inherently lower confidence
+    ftype = (detail.get("type") or "").lower()
+    low_conf_types = {
+        'ai generation marker', 'prompt artifact',
+        'hardcoded phone number', 'hardcoded credit card',
+    }
+    if ftype in low_conf_types:
+        return {**detail, "confidence": "low"}
+    # 3. Severity-based default
     sev = detail.get("severity", "low")
-    return {**detail, "confidence": "high" if sev in ("critical", "high") else sev}
+    return {**detail, "confidence": "high" if sev in ("critical", "high") else "medium"}
 
 
 # Phrases that indicate a module was intentionally skipped due to a missing
@@ -423,6 +452,88 @@ def build_top_fixes(modules_out: list) -> list:
     return top_fixes
 
 
+# ---------------------------------------------------------------------------
+# CWE / OWASP mapping — concrete references per finding type
+# ---------------------------------------------------------------------------
+CWE_MAP = {
+    "hardcoded api key":              {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "hardcoded secret":               {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "hardcoded password":             {"cwe": "CWE-259", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "hardcoded email":                {"cwe": "CWE-200", "owasp": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"},
+    "hardcoded phone number":         {"cwe": "CWE-200", "owasp": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"},
+    "hardcoded aadhaar":              {"cwe": "CWE-312", "owasp": "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"},
+    "hardcoded pan":                  {"cwe": "CWE-312", "owasp": "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"},
+    "hardcoded credit card":          {"cwe": "CWE-312", "owasp": "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"},
+    "unsafe prompt template":         {"cwe": "CWE-77",  "owasp": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"},
+    "missing prompt guardrails":      {"cwe": "CWE-20",  "owasp": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"},
+    "jailbreak vulnerable prompt":    {"cwe": "CWE-77",  "owasp": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"},
+    "unsafe logging":                 {"cwe": "CWE-532", "owasp": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/"},
+    "unresolvable dependency":        {"cwe": "CWE-829", "owasp": "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/"},
+    "license risk":                   {"cwe": None,      "owasp": "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/"},
+    "unprotected route":              {"cwe": "CWE-862", "owasp": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"},
+    "debug mode enabled":             {"cwe": "CWE-489", "owasp": "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"},
+    "wildcard cors":                  {"cwe": "CWE-942", "owasp": "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"},
+    "secret in env file":             {"cwe": "CWE-256", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    # detect-secrets finding types
+    "secret keyword":                 {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "json web token":                 {"cwe": "CWE-522", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "base64 high entropy string":     {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "hex high entropy string":        {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "private key":                    {"cwe": "CWE-321", "owasp": "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"},
+    "aws access key":                 {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "slack token":                    {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "stripe api key":                 {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "github token":                   {"cwe": "CWE-798", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    "basic auth credentials":         {"cwe": "CWE-522", "owasp": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"},
+    # code quality / architectural
+    "bare except":                    {"cwe": "CWE-754", "owasp": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/"},
+    "no subprocess timeout":          {"cwe": "CWE-400", "owasp": "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"},
+    "eval/exec on variable":          {"cwe": "CWE-95",  "owasp": "https://owasp.org/Top10/A03_2021-Injection/"},
+}
+
+
+def _enrich_with_cwe(detail: dict) -> dict:
+    """Add cwe and owasp fields to a finding based on its type."""
+    ftype = _normalize_type(detail.get("type", ""))
+    mapping = CWE_MAP.get(ftype)
+    if mapping:
+        detail["cwe"] = mapping["cwe"]
+        detail["owasp"] = mapping["owasp"]
+    return detail
+
+
+# ---------------------------------------------------------------------------
+# Finding deduplication — collapse duplicates by (type, file), keep the
+# most severe, attach a count. Reduces 30x "same jailbreak keyword" to 1 entry.
+# ---------------------------------------------------------------------------
+
+def _dedup_details(details: list) -> list:
+    """Group findings by (type, file), keep worst severity, add occurrence count."""
+    groups: dict[tuple, list] = {}
+    for d in details:
+        key = (_normalize_type(d.get("type", "")), d.get("file", ""))
+        groups.setdefault(key, []).append(d)
+
+    deduped = []
+    for (_ftype, _ffile), group in groups.items():
+        # Pick the representative finding: highest severity, lowest line number
+        group.sort(key=lambda d: (
+            SEVERITY_ORDER.get(d.get("severity", "low"), 99),
+            d.get("line", 0) or 0,
+        ))
+        best = dict(group[0])
+        if len(group) > 1:
+            best["occurrences"] = len(group)
+            lines = sorted(set(d.get("line", 0) for d in group if d.get("line")))
+            if lines:
+                best["affected_lines"] = lines[:20]  # cap to avoid bloat
+        deduped.append(best)
+
+    # Re-sort by severity
+    deduped.sort(key=lambda d: SEVERITY_ORDER.get(d.get("severity", "low"), 99))
+    return deduped
+
+
 def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = False) -> dict:
     modules = load_modules(static_only=static_only, dynamic_only=dynamic_only)
     modules_out = []
@@ -452,10 +563,12 @@ def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = Fal
         raw_issues = raw_result.get("issues", 0)
         raw_details = raw_result.get("details", [])
 
-        # Assign rule_ids and inject confidence into each detail (non-mutating)
+        # Deduplicate, enrich with confidence/CWE, assign rule_ids
+        deduped_details = _dedup_details(raw_details)
         enriched_details = []
-        for idx, detail in enumerate(raw_details, start=1):
-            d = add_confidence(dict(detail))  # add_confidence returns a new dict
+        for idx, detail in enumerate(deduped_details, start=1):
+            d = add_confidence(dict(detail))
+            d = _enrich_with_cwe(d)
             d["rule_id"] = f"{rule_prefix}-{idx:03d}"
             enriched_details.append(d)
 
@@ -649,9 +762,17 @@ def _persist_to_store(repo_path: str, report: dict) -> None:
         else:
             merged.append(inc)
 
+    # Findings no longer in the scan → auto-resolve (unless manually ignored)
     for old in existing_by_id.values():
         old["isNew"] = False
-        merged.append(old)
+        if old.get("status") == "ignored":
+            merged.append(old)  # keep ignored findings as-is
+        elif old.get("status") == "open":
+            old["status"] = "resolved"
+            old["resolvedAt"] = now
+            merged.append(old)
+        else:
+            merged.append(old)  # already resolved/fixed — keep for history
 
     # Update store
     store["lastScan"] = now
