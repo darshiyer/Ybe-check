@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ybe-check": {
+      "command": "python3",
+      "args": [
+        "/Users/adityaray/Desktop/hackx/A2K2/mcp_server.py"
+      ]
+    }
+  }
+}

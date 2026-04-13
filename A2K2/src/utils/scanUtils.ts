@@ -79,7 +79,7 @@ export async function runEnvironmentHealthCheck(
     const runtime = await detectScanRuntime(pythonPath, context);
     if (!runtime) {
         vscode.window.showWarningMessage(
-            'Ybe Check: scanner runtime not found. Install package with "pip install ybe-check" or reinstall the extension.'
+            'Ybe Check: scanner runtime not found. Please reinstall the extension.'
         );
         return false;
     }
@@ -123,7 +123,7 @@ export async function executeScan(
     const runtime = await detectScanRuntime(pythonPath, context);
     if (!runtime) {
         vscode.window.showErrorMessage(
-            'Ybe Check runtime is unavailable. Install with "pip install ybe-check" or reinstall extension files.'
+            'Ybe Check runtime is unavailable. Please reinstall the extension or check your Python installation.'
         );
         return;
     }

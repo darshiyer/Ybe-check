@@ -8,3 +8,4 @@ tsconfig.json
 !out/**
 node_modules/.package-lock.json
 !cli.py
+!mcp_server.py

@@ -100,7 +100,7 @@
       },
       {
         "command": "ybe-check.installMcp",
-        "title": "Ybe Check: Install / Update MCP Server",
+        "title": "Ybe Check: Refresh MCP Config",
         "category": "Ybe Check"
       },
       {
@@ -130,16 +130,6 @@
           "default": "python3",
           "description": "Path to the Python executable."
         }
-      }
-    },
-    "mcpServers": {
-      "ybe-check": {
-        "command": "${config:ybe-check.pythonPath}",
-        "args": [
-          "-m",
-          "ybe_check.mcp_server"
-        ],
-        "description": "Ybe Check \u2013 security scanner with prompt engineering for AI assistants. Tools: ybe.scan_repo, ybe.list_findings, ybe.get_remediation, ybe.get_security_context, ybe.enhance_prompt, ybe.get_fix_prompt, ybe.get_review_prompt. Prompts: security-audit, fix-critical, review-file."
       }
     },
     "viewsContainers": {

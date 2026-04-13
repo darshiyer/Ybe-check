@@ -15,9 +15,6 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 const MCP_SERVER_ID = 'ybe-check';
-const MCP_MODULE = 'ybe_check.mcp_server';
-const MCP_ARGS = ['-m', MCP_MODULE];
-const PIP_PACKAGE = 'ybe-check';
 
 // ── Severity helpers ────────────────────────────────────────────────
 
@@ -44,74 +41,11 @@ function getPythonPath(): string {
 }
 
 // =====================================================================
-// MCP AUTO-INSTALL — pip install ybe-check + write MCP configs
+// MCP SETUP — self-contained, no pip install needed
 // =====================================================================
 
-/** Check if the ybe_check Python module is importable. */
-async function isMcpInstalled(pythonPath: string): Promise<boolean> {
-    try {
-        await execAsync(`"${pythonPath}" -c "import ybe_check"`, { timeout: 15_000 });
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-/** Install ybe-check via pip. */
-async function installMcpPackage(pythonPath: string): Promise<boolean> {
-    const out = vscode.window.createOutputChannel('Ybe Check Setup');
-    out.show(true);
-    out.appendLine('⏳ Installing ybe-check MCP server package…');
-
-    try {
-        // Detect virtualenv
-        let inVenv = false;
-        try {
-            const { stdout } = await execAsync(
-                `"${pythonPath}" -c "import sys; print(sys.prefix != sys.base_prefix)"`,
-                { timeout: 10_000 },
-            );
-            inVenv = stdout.trim() === 'True';
-        } catch { /* assume no venv */ }
-
-        const ws = vscode.workspace.workspaceFolders;
-        const root = ws && ws.length > 0 ? ws[0].uri.fsPath : undefined;
-
-        // Strategy 1 — local editable install if we *are* the ybe-check repo
-        if (root) {
-            const pyproject = path.join(root, 'pyproject.toml');
-            if (fs.existsSync(pyproject)) {
-                const txt = fs.readFileSync(pyproject, 'utf8');
-                if (txt.includes('name = "ybe-check"') || txt.includes('name="ybe-check"')) {
-                    const cmd = `"${pythonPath}" -m pip install -e "${root}" --quiet`;
-                    out.appendLine(`> ${cmd}`);
-                    const { stdout, stderr } = await execAsync(cmd, { timeout: 120_000, cwd: root });
-                    if (stdout) { out.appendLine(stdout); }
-                    if (stderr) { out.appendLine(stderr); }
-                    out.appendLine('✅ ybe-check installed (editable, local source).');
-                    return true;
-                }
-            }
-        }
-
-        // Strategy 2 — pip install from PyPI
-        const userFlag = inVenv ? '' : '--user';
-        const cmd = `"${pythonPath}" -m pip install ${PIP_PACKAGE} ${userFlag} --quiet`;
-        out.appendLine(`> ${cmd}`);
-        const { stdout, stderr } = await execAsync(cmd, { timeout: 120_000 });
-        if (stdout) { out.appendLine(stdout); }
-        if (stderr) { out.appendLine(stderr); }
-        out.appendLine('✅ ybe-check installed from PyPI.');
-        return true;
-    } catch (err) {
-        out.appendLine(`❌ Install failed: ${err instanceof Error ? err.message : String(err)}`);
-        out.appendLine('Manually run:  pip install ybe-check');
-        return false;
-    }
-}
-
-/** Write a single MCP config file; returns true when content changed. */
-function writeMcpFile(dir: string, mcpFilePath: string, pythonPath: string): boolean {
+/** Write a single MCP config file pointing to the bundled server; returns true when content changed. */
+function writeMcpFile(dir: string, mcpFilePath: string, pythonPath: string, serverScriptPath: string): boolean {
     let config: { mcpServers: Record<string, unknown> } = { mcpServers: {} };
     if (fs.existsSync(mcpFilePath)) {
         try { config = JSON.parse(fs.readFileSync(mcpFilePath, 'utf8')); }
@@ -119,67 +53,49 @@ function writeMcpFile(dir: string, mcpFilePath: string, pythonPath: string): boo
     }
     if (!config.mcpServers) { config.mcpServers = {}; }
 
+    const expectedArgs = [serverScriptPath];
     const existing = config.mcpServers[MCP_SERVER_ID] as
         { command?: string; args?: string[] } | undefined;
 
     if (
         existing &&
         existing.command === pythonPath &&
-        JSON.stringify(existing.args) === JSON.stringify(MCP_ARGS)
+        JSON.stringify(existing.args) === JSON.stringify(expectedArgs)
     ) {
         return false; // already up-to-date
     }
 
-    config.mcpServers[MCP_SERVER_ID] = { command: pythonPath, args: MCP_ARGS };
+    config.mcpServers[MCP_SERVER_ID] = { command: pythonPath, args: expectedArgs };
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
     fs.writeFileSync(mcpFilePath, JSON.stringify(config, null, 2));
     return true;
 }
 
 /**
- * Full MCP bootstrap:
- *  1. pip install ybe-check (if missing)
- *  2. Write .vscode/mcp.json  +  .cursor/mcp.json
+ * MCP bootstrap — write .vscode/mcp.json + .cursor/mcp.json
+ * pointing to the bundled mcp_server.py (no pip install required).
  */
 async function ensureMcpSetup(context: vscode.ExtensionContext): Promise<void> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) { return; }
 
     const pythonPath = getPythonPath();
+    const mcpServerScript = path.join(context.extensionPath, 'mcp_server.py');
 
-    // Step 1 — install the Python package if it's not importable
-    const installed = await isMcpInstalled(pythonPath);
-    if (!installed) {
-        const choice = await vscode.window.showInformationMessage(
-            'Ybe Check: The MCP server package is not installed. Install it now?',
-            'Install', 'Skip',
-        );
-        if (choice === 'Install') {
-            const ok = await installMcpPackage(pythonPath);
-            if (!ok) {
-                vscode.window.showErrorMessage(
-                    'Ybe Check: Could not install MCP package. Run `pip install ybe-check` manually.',
-                );
-                return;
-            }
-        } else {
-            return;
-        }
-    }
+    if (!fs.existsSync(mcpServerScript)) { return; } // safety check
 
-    // Step 2 — write config files
     const root = workspaceFolders[0].uri.fsPath;
     let changed = false;
 
     const vscodeDir = path.join(root, '.vscode');
-    changed = writeMcpFile(vscodeDir, path.join(vscodeDir, 'mcp.json'), pythonPath) || changed;
+    changed = writeMcpFile(vscodeDir, path.join(vscodeDir, 'mcp.json'), pythonPath, mcpServerScript) || changed;
 
     const cursorDir = path.join(root, '.cursor');
-    changed = writeMcpFile(cursorDir, path.join(cursorDir, 'mcp.json'), pythonPath) || changed;
+    changed = writeMcpFile(cursorDir, path.join(cursorDir, 'mcp.json'), pythonPath, mcpServerScript) || changed;
 
     if (changed) {
         vscode.window.showInformationMessage(
-            'Ybe Check: MCP server installed & registered. Reload to activate.',
+            'Ybe Check: MCP server configured. Reload to activate.',
             'Reload',
         ).then(a => {
             if (a === 'Reload') { vscode.commands.executeCommand('workbench.action.reloadWindow'); }
@@ -794,20 +710,12 @@ Group by file when possible.`);
         }),
     );
 
-    // 10 ── (Re)install MCP package manually ─────────────────────────
+    // 10 ── Refresh MCP config (re-write .vscode/mcp.json) ─────────
     context.subscriptions.push(
         vscode.commands.registerCommand('ybe-check.installMcp', async () => {
-            const py = getPythonPath();
-            const ok = await installMcpPackage(py);
-            if (ok) {
-                const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-                if (root) {
-                    const d = path.join(root, '.vscode');
-                    writeMcpFile(d, path.join(d, 'mcp.json'), py);
-                }
-                vscode.window.showInformationMessage('Ybe Check: MCP installed!', 'Reload')
-                    .then(a => { if (a === 'Reload') { vscode.commands.executeCommand('workbench.action.reloadWindow'); } });
-            }
+            await ensureMcpSetup(context);
+            vscode.window.showInformationMessage('Ybe Check: MCP config refreshed.', 'Reload')
+                .then(a => { if (a === 'Reload') { vscode.commands.executeCommand('workbench.action.reloadWindow'); } });
         }),
     );
 
