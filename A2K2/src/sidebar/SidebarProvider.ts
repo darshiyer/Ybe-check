@@ -1,18 +1,17 @@
 /**
  * SidebarProvider.ts
- * Security feed sidebar — watches .ybe-check/store.json and renders findings.
- * The agent feeds it via MCP/CLI, the sidebar displays it.
+ * Security feed sidebar — streaming scan, changed-files mode, path targeting.
  */
 
 import * as vscode from 'vscode';
 import * as path   from 'path';
 import * as crypto from 'crypto';
-import { exec }    from 'child_process';
-import { promisify } from 'util';
+import { exec, spawn }  from 'child_process';
+import { promisify }    from 'util';
 
 import { SecurityStore, StoreData, FindingStatus } from './store';
-import { getSidebarHtml } from './sidebarTemplate';
-import { buildAiPrompt, buildModulePrompt, Finding }  from './promptBuilder';
+import { getSidebarHtml, ModuleProgress }          from './sidebarTemplate';
+import { buildAiPrompt }                           from './promptBuilder';
 
 const execAsync = promisify(exec);
 
@@ -22,6 +21,10 @@ function getNonce(): string {
 
 function getPythonPath(): string {
     return vscode.workspace.getConfiguration('ybe-check').get<string>('pythonPath', 'python3');
+}
+
+function getExcludePatterns(): string[] {
+    return vscode.workspace.getConfiguration('ybe-check').get<string[]>('excludePatterns', []);
 }
 
 function getCLIPath(context: vscode.ExtensionContext): string {
@@ -43,12 +46,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _autoScanDisposable?: vscode.Disposable;
     private _scanning = false;
     private _autoScan = false;
+    private _scanProgress: ModuleProgress[] = [];
+    private _scanScope = '';
 
     constructor(context: vscode.ExtensionContext) {
         this._context = context;
         this._autoScan = context.globalState.get('ybeAutoScan', false);
 
-        // Initialize store if workspace is open
         const root = getWorkspaceRoot();
         if (root) {
             this._store = new SecurityStore(root);
@@ -66,138 +70,157 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         _token: vscode.CancellationToken
     ): void {
         this._view = webviewView;
-
-        webviewView.webview.options = {
-            enableScripts: true,
-        };
-
+        webviewView.webview.options = { enableScripts: true };
         this._render();
 
         webviewView.webview.onDidReceiveMessage(msg => {
             switch (msg.type) {
-
-                case 'runScan':
-                    this.runScan();
-                    break;
-
-                case 'toggleAutoScan':
-                    this._setAutoScan(msg.value);
-                    break;
-
-                case 'setStatus':
-                    this._handleSetStatus(msg.findingId, msg.status);
-                    break;
-
-                case 'copyPrompt':
-                    this._handleCopyPrompt(msg.findingId);
-                    break;
-
-                case 'openCopilot':
-                    this._handleOpenCopilot(msg.findingId);
-                    break;
-
-                case 'fixWithAgent':
-                    this._handleFixWithAgent(msg.findingId);
-                    break;
-
-                case 'exportReport':
-                    this._exportReport();
-                    break;
-
-                case 'setFilter':
-                    // Filter is handled in the webview JS, just re-render isn't needed
-                    break;
+                case 'runScan':       this.runScan(); break;
+                case 'runChanged':    this.runChangedScan(); break;
+                case 'toggleAutoScan': this._setAutoScan(msg.value); break;
+                case 'setStatus':     this._handleSetStatus(msg.findingId, msg.status); break;
+                case 'fixWithAgent':  this._handleFixWithAgent(msg.findingId); break;
+                case 'exportReport':  this._exportReport(); break;
             }
         }, undefined, this._context.subscriptions);
     }
 
-    /** Watch the store file for changes (e.g. from MCP or CLI). */
     private _watchStore(root: string): void {
         const pattern = new vscode.RelativePattern(root, '.ybe-check/store.json');
         this._fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
-
-        const reload = () => {
-            this._store?.reload();
-            this._render();
-        };
-
+        const reload = () => { this._store?.reload(); this._render(); };
         this._fileWatcher.onDidChange(reload);
         this._fileWatcher.onDidCreate(reload);
         this._context.subscriptions.push(this._fileWatcher);
     }
 
-    /** Trigger a scan from sidebar or command palette. */
+    // ── Scan entry points ────────────────────────────────────────────
+
+    /** Full repo scan. */
     public async runScan(): Promise<void> {
+        await this._startScan({ scope: 'Full scan' });
+    }
+
+    /** Scan only git-changed/untracked files. */
+    public async runChangedScan(): Promise<void> {
+        const root = getWorkspaceRoot();
+        if (!root) { vscode.window.showWarningMessage('Ybe Check: Open a folder first.'); return; }
+        await this._startScan({ scope: 'Changed files', extraArgs: ['--changed'] });
+    }
+
+    /** Scan a specific file or folder (right-click). */
+    public async runPathScan(fsPath: string): Promise<void> {
+        const root = getWorkspaceRoot();
+        if (!root) { vscode.window.showWarningMessage('Ybe Check: Open a folder first.'); return; }
+        const rel = path.relative(root, fsPath);
+        await this._startScan({
+            scope: rel.length < 40 ? rel : '...' + rel.slice(-37),
+            extraArgs: ['--paths', fsPath],
+        });
+    }
+
+    // ── Core scan runner (streaming) ─────────────────────────────────
+
+    private async _startScan(opts: { scope: string; extraArgs?: string[] }): Promise<void> {
         if (this._scanning) { return; }
 
         const root = getWorkspaceRoot();
-        if (!root) {
-            vscode.window.showWarningMessage('Ybe Check: Open a folder first.');
-            return;
-        }
+        if (!root) { vscode.window.showWarningMessage('Ybe Check: Open a folder first.'); return; }
 
         this._scanning = true;
+        this._scanProgress = [];
+        this._scanScope = opts.scope;
         this._render();
 
-        const python = getPythonPath();
-        const cli    = getCLIPath(this._context);
+        const python  = getPythonPath();
+        const cli     = getCLIPath(this._context);
+        const exclude = getExcludePatterns();
 
-        // Cycle through module names in the panel during the scan so the
-        // user sees progress rather than a static spinner.
-        const MODULE_LABELS = [
-            'Secrets Detection', 'Prompt Injection', 'PII & Logging',
-            'Auth Guards', 'IaC Security', 'License Compliance',
-            'Test Coverage', 'AI Traceability', 'Config & Env', 'Dependencies',
-        ];
-        let labelIdx = 0;
-        const progressTimer = setInterval(() => {
-            this._data = {
-                ...this._data,
-                scanningModule: `Scanning ${MODULE_LABELS[labelIdx % MODULE_LABELS.length]}…`,
-            };
-            this._render();
-            labelIdx++;
-        }, 1800);
+        const args = [cli, root, '--static', '--stream'];
+        if (opts.extraArgs) { args.push(...opts.extraArgs); }
+        if (exclude.length) { args.push('--exclude', ...exclude); }
 
-        try {
-            await execAsync(
-                `"${python}" "${cli}" "${root}" --static --json`,
-                { maxBuffer: 10 * 1024 * 1024, cwd: root }
-            );
-            // CLI writes to .ybe-check/store.json — file watcher will trigger re-render
-            // But force a reload just in case
-            this._store?.reload();
-        } catch (err: any) {
-            // Even on error, CLI may have written partial results
-            this._store?.reload();
-        } finally {
-            clearInterval(progressTimer);
-            this._scanning = false;
-            this._render();
-        }
+        return new Promise<void>(resolve => {
+            const proc = spawn(python, args, { cwd: root });
+            let buf = '';
+
+            proc.stdout.on('data', (chunk: Buffer) => {
+                buf += chunk.toString();
+                const lines = buf.split('\n');
+                buf = lines.pop() ?? '';
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) { continue; }
+                    try {
+                        const msg = JSON.parse(trimmed);
+                        if (msg.event === 'module_progress') {
+                            this._scanProgress.push({
+                                module: msg.module,
+                                score: msg.score,
+                                issues: msg.issues,
+                                status: msg.status,
+                                done: true,
+                            });
+                            this._render();
+                        } else if (msg.event === 'scan_complete') {
+                            this._store?.reload();
+                            this._scanning = false;
+                            this._scanProgress = [];
+                            this._render();
+                        }
+                    } catch { /* incomplete JSON line */ }
+                }
+            });
+
+            proc.stderr.on('data', (chunk: Buffer) => {
+                // Module warnings land here — not errors
+                const txt = chunk.toString().trim();
+                if (txt) { console.log('[ybe-check stderr]', txt); }
+            });
+
+            proc.on('close', () => {
+                if (this._scanning) {
+                    // Process ended without scan_complete (e.g. detect-secrets timeout)
+                    this._store?.reload();
+                    this._scanning = false;
+                    this._scanProgress = [];
+                    this._render();
+                }
+                resolve();
+            });
+
+            proc.on('error', (err) => {
+                vscode.window.showErrorMessage(`Ybe Check: ${err.message}`);
+                this._scanning = false;
+                this._scanProgress = [];
+                this._render();
+                resolve();
+            });
+        });
     }
 
-    // ── Render ──────────────────────────────────────────────────────
+    // ── Render ───────────────────────────────────────────────────────
 
     private _render(): void {
         if (!this._view) { return; }
         const nonce = getNonce();
-        const storeData = this._store?.data;
         this._view.webview.html = getSidebarHtml({
-            store: storeData || null,
+            store: this._store?.data ?? null,
             scanning: this._scanning,
             autoScan: this._autoScan,
-            counts: this._store?.getCounts() || { open: 0, fixed: 0, ignored: 0, total: 0, new: 0 },
+            counts: this._store?.getCounts() ?? { open: 0, fixed: 0, ignored: 0, total: 0, new: 0 },
+            scanProgress: this._scanProgress,
+            scanScope: this._scanScope,
         }, nonce);
     }
 
-    // ── Auto-scan ───────────────────────────────────────────────────
+    // ── Auto-scan ────────────────────────────────────────────────────
 
     private _setAutoScan(on: boolean): void {
         this._autoScan = on;
         this._context.globalState.update('ybeAutoScan', on);
-        if (on) { this._enableAutoScan(); }
-        else { this._disableAutoScan(); }
+        if (on) { this._enableAutoScan(); } else { this._disableAutoScan(); }
     }
 
     private _enableAutoScan(): void {
@@ -217,12 +240,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._autoScanDisposable = undefined;
     }
 
-    // ── Finding actions ─────────────────────────────────────────────
+    // ── Finding actions ──────────────────────────────────────────────
 
-    /**
-     * Try to send the fix prompt directly to whichever AI agent is active.
-     * Tries: Claude Code → Copilot Chat → generic VS Code chat → clipboard fallback.
-     */
     private async _handleFixWithAgent(findingId: string): Promise<void> {
         const finding = this._store?.data.findings.find(f => f.id === findingId);
         if (!finding) { return; }
@@ -239,14 +258,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             rule_id: finding.rule_id,
         }, finding.module, root);
 
-        // Write fix request to queue file — MCP server picks it up
+        // Write to fix-queue for MCP pickup
         const wsRoot = getWorkspaceRoot();
         if (wsRoot) {
             const fs = await import('fs');
             const queuePath = path.join(wsRoot, '.ybe-check', 'fix-queue.json');
-            const queueDir = path.join(wsRoot, '.ybe-check');
+            const queueDir  = path.join(wsRoot, '.ybe-check');
             if (!fs.existsSync(queueDir)) { fs.mkdirSync(queueDir, { recursive: true }); }
-            const request = {
+            fs.writeFileSync(queuePath, JSON.stringify({
                 timestamp: new Date().toISOString(),
                 findingId: finding.id,
                 module: finding.module,
@@ -255,26 +274,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 file: finding.file,
                 line: finding.line,
                 reason: finding.reason,
-                prompt: prompt,
-            };
-            fs.writeFileSync(queuePath, JSON.stringify(request, null, 2), 'utf-8');
+                prompt,
+            }, null, 2), 'utf-8');
         }
 
-        // Send directly to Claude Code — it accepts initialPrompt as 2nd arg
+        // Try Claude Code → Copilot → clipboard
         try {
             await vscode.commands.executeCommand('claude-vscode.editor.open', undefined, prompt);
             this._view?.webview.postMessage({ type: 'toast', text: 'Sent to Claude', style: 'ok' });
             return;
-        } catch { /* Claude Code not available */ }
+        } catch { /* not available */ }
 
-        // Try Copilot chat with query param
         try {
             await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
             this._view?.webview.postMessage({ type: 'toast', text: 'Sent to Copilot', style: 'ok' });
             return;
-        } catch { /* Copilot not available */ }
+        } catch { /* not available */ }
 
-        // Fallback: clipboard
         await vscode.env.clipboard.writeText(prompt);
         try { await vscode.commands.executeCommand('claude-vscode.sidebar.open'); } catch {}
         this._view?.webview.postMessage({ type: 'toast', text: 'Prompt copied — Cmd+V', style: 'ok' });
@@ -286,64 +302,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._render();
         this._view?.webview.postMessage({
             type: 'toast',
-            text: status === 'fixed' ? 'Marked as fixed' : status === 'ignored' ? 'Ignored' : 'Reopened',
-            style: 'success'
+            text: status === 'fixed' ? 'Marked as fixed' : 'Ignored',
+            style: 'ok',
         });
-    }
-
-    private _handleCopyPrompt(findingId: string): void {
-        const finding = this._store?.data.findings.find(f => f.id === findingId);
-        if (!finding) { return; }
-        const root = getWorkspaceRoot() || '.';
-
-        const prompt = buildAiPrompt({
-            severity: finding.severity,
-            type: finding.type,
-            file: finding.file,
-            line: finding.line,
-            reason: finding.reason,
-            snippet: finding.snippet,
-            remediation: finding.remediation,
-            rule_id: finding.rule_id,
-        }, finding.module, root);
-
-        vscode.env.clipboard.writeText(prompt).then(() => {
-            this._view?.webview.postMessage({ type: 'toast', text: 'Prompt copied', style: 'success' });
-        });
-    }
-
-    private async _handleOpenCopilot(findingId: string): Promise<void> {
-        const finding = this._store?.data.findings.find(f => f.id === findingId);
-        if (!finding) { return; }
-        const root = getWorkspaceRoot() || '.';
-
-        const prompt = buildAiPrompt({
-            severity: finding.severity,
-            type: finding.type,
-            file: finding.file,
-            line: finding.line,
-            reason: finding.reason,
-            snippet: finding.snippet,
-            remediation: finding.remediation,
-            rule_id: finding.rule_id,
-        }, finding.module, root);
-
-        await vscode.env.clipboard.writeText(prompt);
-
-        try {
-            await vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
-            await new Promise(r => setTimeout(r, 400));
-            await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
-        } catch {
-            vscode.window.showInformationMessage(
-                'Prompt copied. Paste it into your AI assistant.',
-                'Open Chat'
-            ).then(sel => {
-                if (sel === 'Open Chat') {
-                    vscode.commands.executeCommand('workbench.action.openChat').then(undefined, () => {});
-                }
-            });
-        }
     }
 
     // ── Export ───────────────────────────────────────────────────────

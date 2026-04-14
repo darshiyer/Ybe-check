@@ -3,6 +3,7 @@ Shared utilities for Ybe Check scan modules.
 Eliminates code duplication across secrets, prompt_injection, pii_logging, and auth_guards.
 """
 
+import fnmatch
 import os
 from typing import List, Optional, Set
 
@@ -11,6 +12,12 @@ from typing import List, Optional, Set
 # the scanner's own source code (prevents ironic false positives).
 SCANNER_MODULES_DIR: str = os.path.dirname(os.path.abspath(__file__))
 SCANNER_ROOT_DIR: str = os.path.dirname(SCANNER_MODULES_DIR)  # extension root
+
+# ── SCAN CONTEXT (set by CLI before running modules) ─────────
+# When set, walk_files only returns files under these real paths.
+SCAN_INCLUDE_PATHS: Optional[Set[str]] = None
+# Glob patterns relative to repo root; matching files are excluded.
+SCAN_EXCLUDE_PATTERNS: List[str] = []
 
 
 def is_scanner_file(fpath: str) -> bool:
@@ -51,7 +58,7 @@ def walk_files(repo_path: str, extensions: Set[str]) -> List[str]:
     """
     Walk a repository directory yielding file paths matching given extensions.
     Skips ignored directories, binary extensions, symlinks, oversized files,
-    and the scanner's own source tree.
+    the scanner's own source tree, and any paths outside SCAN_INCLUDE_PATHS.
 
     Args:
         repo_path: Root directory to walk.
@@ -61,6 +68,9 @@ def walk_files(repo_path: str, extensions: Set[str]) -> List[str]:
         List of absolute file paths matching the criteria.
     """
     files = []
+    include = SCAN_INCLUDE_PATHS   # module-level global set by CLI
+    exclude = SCAN_EXCLUDE_PATTERNS  # module-level global set by CLI
+
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         # Skip the scanner's own directory tree
@@ -78,6 +88,16 @@ def walk_files(repo_path: str, extensions: Set[str]) -> List[str]:
                     continue
             except OSError:
                 continue
+            # Include-paths filter: skip files outside the requested scope
+            if include is not None:
+                real_full = os.path.realpath(full)
+                if not any(real_full == p or real_full.startswith(p + os.sep) for p in include):
+                    continue
+            # Exclude-patterns filter
+            if exclude:
+                rel = os.path.relpath(full, repo_path)
+                if any(fnmatch.fnmatch(rel, pat) for pat in exclude):
+                    continue
             files.append(full)
     return files
 

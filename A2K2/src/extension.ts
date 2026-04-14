@@ -466,6 +466,17 @@ export function activate(context: vscode.ExtensionContext) {
     // Sidebar-specific commands
     context.subscriptions.push(
         vscode.commands.registerCommand('ybe-check.runSidebarScan', () => sidebarProvider.runScan()),
+        vscode.commands.registerCommand('ybe-check.scanChanged', () => sidebarProvider.runChangedScan()),
+        vscode.commands.registerCommand('ybe-check.scanFile', (uri: vscode.Uri) => {
+            const target = uri?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+            if (target) { sidebarProvider.runPathScan(target); }
+            else { vscode.window.showWarningMessage('Ybe Check: No file selected.'); }
+        }),
+        vscode.commands.registerCommand('ybe-check.scanFolder', (uri: vscode.Uri) => {
+            const target = uri?.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (target) { sidebarProvider.runPathScan(target); }
+            else { vscode.window.showWarningMessage('Ybe Check: No folder selected.'); }
+        }),
         vscode.commands.registerCommand('ybe-check.toggleAutoScan', () =>
             vscode.window.showQuickPick(['Enable', 'Disable'], { title: 'Auto-Scan on Save' })
                 .then(sel => { if (sel) { sidebarProvider.runScan(); } })

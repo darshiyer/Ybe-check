@@ -534,7 +534,76 @@ def _dedup_details(details: list) -> list:
     return deduped
 
 
-def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = False) -> dict:
+def get_changed_files(repo_path: str) -> list:
+    """Return absolute paths of files changed/untracked since last commit."""
+    import subprocess
+    try:
+        r1 = subprocess.run(
+            ['git', 'diff', '--name-only', 'HEAD'],
+            cwd=repo_path, capture_output=True, text=True, timeout=10
+        )
+        r2 = subprocess.run(
+            ['git', 'ls-files', '--others', '--exclude-standard'],
+            cwd=repo_path, capture_output=True, text=True, timeout=10
+        )
+        r3 = subprocess.run(
+            ['git', 'diff', '--name-only', '--cached'],
+            cwd=repo_path, capture_output=True, text=True, timeout=10
+        )
+        raw = (r1.stdout + "\n" + r2.stdout + "\n" + r3.stdout).strip()
+        files = [f.strip() for f in raw.split("\n") if f.strip()]
+        return list({os.path.abspath(os.path.join(repo_path, f)) for f in files})
+    except Exception:
+        return []
+
+
+def _filter_details_by_paths(details: list, repo_path: str, include_paths: list) -> list:
+    """Keep only findings whose file is under one of include_paths."""
+    if not include_paths:
+        return details
+    filtered = []
+    for d in details:
+        file_rel = d.get("file", "")
+        if not file_rel:
+            continue
+        file_abs = os.path.realpath(os.path.join(repo_path, file_rel))
+        for p in include_paths:
+            rp = os.path.realpath(p)
+            if file_abs == rp or file_abs.startswith(rp + os.sep):
+                filtered.append(d)
+                break
+    return filtered
+
+
+def _filter_details_by_exclude(details: list, exclude_patterns: list) -> list:
+    """Remove findings whose file matches any exclude glob pattern."""
+    if not exclude_patterns:
+        return details
+    import fnmatch
+    return [
+        d for d in details
+        if not any(fnmatch.fnmatch(d.get("file", ""), pat) for pat in exclude_patterns)
+    ]
+
+
+def run_scan(
+    repo_path: str,
+    static_only: bool = False,
+    dynamic_only: bool = False,
+    stream_callback=None,
+    include_paths: list = None,
+    exclude_patterns: list = None,
+) -> dict:
+    # Set global path context so _utils.walk_files and code_quality can use it
+    try:
+        import modules._utils as _scan_utils
+        _scan_utils.SCAN_INCLUDE_PATHS = (
+            {os.path.realpath(p) for p in include_paths} if include_paths else None
+        )
+        _scan_utils.SCAN_EXCLUDE_PATTERNS = exclude_patterns or []
+    except ImportError:
+        pass
+
     modules = load_modules(static_only=static_only, dynamic_only=dynamic_only)
     modules_out = []
 
@@ -547,7 +616,7 @@ def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = Fal
             raw_result = mod.scan(repo_path)
         except Exception as e:
             print(f"[ybe-check] Module {display_name} errored: {e}", file=sys.stderr)
-            modules_out.append({
+            entry = {
                 "name": display_name,
                 "rule_prefix": rule_prefix,
                 "score": None,
@@ -556,12 +625,20 @@ def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = Fal
                 "issues": 0,
                 "details": [],
                 "warning": str(e),
-            })
+            }
+            if stream_callback:
+                stream_callback(entry)
+            modules_out.append(entry)
             continue
 
         raw_score = raw_result.get("score")
-        raw_issues = raw_result.get("issues", 0)
         raw_details = raw_result.get("details", [])
+
+        # Apply path/exclude filters before dedup
+        if include_paths:
+            raw_details = _filter_details_by_paths(raw_details, repo_path, include_paths)
+        if exclude_patterns:
+            raw_details = _filter_details_by_exclude(raw_details, exclude_patterns)
 
         # Deduplicate, enrich with confidence/CWE, assign rule_ids
         deduped_details = _dedup_details(raw_details)
@@ -572,10 +649,15 @@ def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = Fal
             d["rule_id"] = f"{rule_prefix}-{idx:03d}"
             enriched_details.append(d)
 
-        # Determine status — pass the warning string so we can distinguish
-        # 'skipped' (missing optional tool) from 'errored' (unexpected crash)
+        # Recompute score from filtered details when path filter is active
+        if include_paths and raw_details:
+            from modules._utils import compute_score
+            raw_score = compute_score(enriched_details)
+        elif include_paths:
+            raw_score = 100
+
         raw_warning = raw_result.get("warning", "")
-        status = determine_status(raw_score, raw_issues, warning=raw_warning)
+        status = determine_status(raw_score, len(enriched_details), warning=raw_warning)
 
         module_entry = {
             "name": display_name,
@@ -583,17 +665,19 @@ def run_scan(repo_path: str, static_only: bool = False, dynamic_only: bool = Fal
             "score": raw_score,
             "weight": weight,
             "status": status,
-            "issues": raw_issues,
+            "issues": len(enriched_details),
             "details": enriched_details,
         }
 
-        # Preserve warning/error/suppressed from the raw result if present
         if raw_result.get("warning"):
             module_entry["warning"] = raw_result["warning"]
         if raw_result.get("error"):
             module_entry["error"] = raw_result["error"]
         if "suppressed" in raw_result:
             module_entry["suppressed"] = raw_result["suppressed"]
+
+        if stream_callback:
+            stream_callback(module_entry)
 
         modules_out.append(module_entry)
 
@@ -811,6 +895,22 @@ def main():
         "--dynamic", action="store_true",
         help="Run dynamic analysis only (opt-in)"
     )
+    parser.add_argument(
+        "--stream", action="store_true",
+        help="Emit one NDJSON line per module as it completes, then a final scan_complete line"
+    )
+    parser.add_argument(
+        "--paths", nargs="+", metavar="PATH",
+        help="Only report findings in these files/directories (absolute or relative to repo_path)"
+    )
+    parser.add_argument(
+        "--changed", action="store_true",
+        help="Only report findings in files changed/untracked since last git commit"
+    )
+    parser.add_argument(
+        "--exclude", nargs="+", metavar="PATTERN",
+        help="Glob patterns to exclude from findings (e.g. 'legacy/**' 'vendor/**')"
+    )
     args = parser.parse_args()
 
     repo_path = os.path.abspath(args.repo_path)
@@ -823,27 +923,84 @@ def main():
             "overall_score": 0,
             "verdict": "NOT READY",
         }
-        if args.json:
-            print(json.dumps(error_payload, indent=2))
+        if args.json or args.stream:
+            print(json.dumps(error_payload), flush=True)
         else:
             print(f"Error: Not a directory: {repo_path}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        # Static-only is the default unless --dynamic is explicitly requested.
-        static_mode = args.static or not args.dynamic
-        report = run_scan(repo_path, static_only=static_mode, dynamic_only=args.dynamic)
+    # Resolve include_paths
+    include_paths = None
+    if args.changed:
+        include_paths = get_changed_files(repo_path)
+        if not include_paths:
+            # No changed files — emit empty result
+            empty = {
+                "event": "scan_complete" if args.stream else None,
+                "tool": "Ybe Check", "version": "1.0.0",
+                "repo": repo_path, "overall_score": 100,
+                "verdict": "PRODUCTION READY", "summary": {},
+                "top_fixes": [], "modules": [],
+                "scan_scope": "changed_files", "changed_files_count": 0,
+            }
+            print(json.dumps(empty), flush=True)
+            return
+    elif args.paths:
+        include_paths = [
+            p if os.path.isabs(p) else os.path.join(repo_path, p)
+            for p in args.paths
+        ]
 
-        # Persist to .ybe-check/store.json for the sidebar feed
+    exclude_patterns = args.exclude or []
+
+    # Stream callback — emits one line per module
+    stream_cb = None
+    if args.stream:
+        def stream_cb(module_entry):
+            line = {
+                "event": "module_progress",
+                "module": module_entry["name"],
+                "score": module_entry["score"],
+                "issues": module_entry["issues"],
+                "status": module_entry["status"],
+            }
+            print(json.dumps(line), flush=True)
+
+    try:
+        static_mode = args.static or not args.dynamic
+        report = run_scan(
+            repo_path,
+            static_only=static_mode,
+            dynamic_only=args.dynamic,
+            stream_callback=stream_cb,
+            include_paths=include_paths,
+            exclude_patterns=exclude_patterns,
+        )
+
+        # Tag report with scan scope for the UI
+        if args.changed:
+            report["scan_scope"] = "changed_files"
+            report["changed_files_count"] = len(include_paths) if include_paths else 0
+        elif include_paths:
+            report["scan_scope"] = "paths"
+            report["scanned_paths"] = [
+                os.path.relpath(p, repo_path) for p in include_paths
+            ]
+        else:
+            report["scan_scope"] = "full"
+
+        # Persist to .ybe-check/store.json
         _persist_to_store(repo_path, report)
 
-        if args.json:
+        if args.stream:
+            final = {"event": "scan_complete", **report}
+            print(json.dumps(final), flush=True)
+        elif args.json:
             print(json.dumps(report, indent=2))
         else:
             print(format_plain_text(report))
 
     except Exception as e:
-        # Catastrophic failure — always emit valid JSON
         fallback = {
             "tool": "Ybe Check",
             "version": "1.0.0",
@@ -851,8 +1008,9 @@ def main():
             "overall_score": 0,
             "verdict": "NOT READY",
         }
-        if args.json:
-            print(json.dumps(fallback, indent=2))
+        if args.json or args.stream:
+            event = {"event": "scan_complete", **fallback} if args.stream else fallback
+            print(json.dumps(event), flush=True)
         else:
             print(f"Fatal error: {e}", file=sys.stderr)
         sys.exit(1)

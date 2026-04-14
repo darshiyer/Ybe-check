@@ -1,15 +1,25 @@
 /**
  * sidebarTemplate.ts
- * Security inbox — top issues, actionable, clean.
+ * Security inbox — streaming progress, scope indicator, last-scanned age.
  */
 
 import { StoreData, StoredFinding } from './store';
+
+export interface ModuleProgress {
+    module: string;
+    score: number | null;
+    issues: number;
+    status: string;
+    done: boolean;
+}
 
 export interface SidebarInput {
     store: StoreData | null;
     scanning: boolean;
     autoScan: boolean;
     counts: { open: number; fixed: number; ignored: number; total: number; new: number };
+    scanProgress: ModuleProgress[];
+    scanScope: string;
 }
 
 interface FindingGroup {
@@ -35,9 +45,7 @@ function groupFindings(findings: StoredFinding[]): FindingGroup[] {
         g.count++;
         g.ids.push(f.id);
         if (f.isNew) { g.hasNew = true; }
-        if (g.files.length < 5) {
-            g.files.push({ path: f.file, line: f.line });
-        }
+        if (g.files.length < 5) { g.files.push({ path: f.file, line: f.line }); }
     }
     return Array.from(map.values());
 }
@@ -55,40 +63,50 @@ function shortPath(p: string): string {
     return p.length > 35 ? '...' + p.slice(-33) : p;
 }
 
+function timeAgo(iso: string | null): string {
+    if (!iso) { return ''; }
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (diff < 60) { return 'just now'; }
+    if (diff < 3600) { return `${Math.floor(diff / 60)}m ago`; }
+    if (diff < 86400) { return `${Math.floor(diff / 3600)}h ago`; }
+    return `${Math.floor(diff / 86400)}d ago`;
+}
+
 export function getSidebarHtml(input: SidebarInput, nonce: string): string {
-    const { store, scanning, autoScan, counts } = input;
+    const { store, scanning, autoScan, counts, scanProgress, scanScope } = input;
     const score = store?.currentScore ?? null;
     const sc = scoreColor(score);
     const findings = store?.findings || [];
+    const lastAgo = timeAgo(store?.lastScan ?? null);
 
     const openGroups = groupFindings(findings.filter(f => f.status === 'open'))
         .sort((a, b) => {
             const sd = (SEV_W[b.severity] || 0) - (SEV_W[a.severity] || 0);
-            if (sd !== 0) { return sd; }
-            return b.count - a.count;
+            return sd !== 0 ? sd : b.count - a.count;
         });
 
-    const fixedCount = findings.filter(f => f.status === 'fixed').length;
+    const fixedCount   = findings.filter(f => f.status === 'fixed').length;
     const ignoredCount = findings.filter(f => f.status === 'ignored').length;
 
-    const top = openGroups.slice(0, 5);
+    const top  = openGroups.slice(0, 5);
     const rest = openGroups.slice(5);
 
-    // Verdict text
     let verdictText = '';
     let verdictClass = '';
     if (store?.lastScan) {
-        if (score !== null && score >= 80) { verdictText = 'Ready to ship'; verdictClass = 'v-ok'; }
-        else if (score !== null && score >= 40) { verdictText = 'Needs work'; verdictClass = 'v-warn'; }
-        else if (score !== null) { verdictText = 'Not ready'; verdictClass = 'v-bad'; }
+        if (score !== null && score >= 80)      { verdictText = 'Ready to ship'; verdictClass = 'v-ok'; }
+        else if (score !== null && score >= 40) { verdictText = 'Needs work';    verdictClass = 'v-warn'; }
+        else if (score !== null)                { verdictText = 'Not ready';     verdictClass = 'v-bad'; }
     }
 
     function renderGroup(g: FindingGroup, idx: number): string {
-        const idsAttr = g.ids.map(id => id).join(',');
+        const idsAttr  = g.ids.join(',');
         const filesHtml = g.files.map(f =>
             `<div class="f-loc">${shortPath(f.path)}${f.line ? ':' + f.line : ''}</div>`
         ).join('');
-        const moreFiles = g.count > g.files.length ? `<div class="f-loc f-more">+ ${g.count - g.files.length} more</div>` : '';
+        const moreFiles = g.count > g.files.length
+            ? `<div class="f-loc f-more">+ ${g.count - g.files.length} more</div>`
+            : '';
 
         return `
         <div class="issue" id="issue-${idx}" data-ids="${idsAttr}">
@@ -127,14 +145,33 @@ export function getSidebarHtml(input: SidebarInput, nonce: string): string {
 
     const resolvedHtml = (fixedCount > 0 || ignoredCount > 0) ? `
       <div class="resolved-bar">
-        ${fixedCount > 0 ? `<span class="r-pill r-fixed">${fixedCount} fixed</span>` : ''}
+        ${fixedCount   > 0 ? `<span class="r-pill r-fixed">${fixedCount} fixed</span>`     : ''}
         ${ignoredCount > 0 ? `<span class="r-pill r-ignored">${ignoredCount} ignored</span>` : ''}
       </div>` : '';
+
+    // ── Scanning progress rows ──────────────────────────────────────
+    const progressHtml = scanning && scanProgress.length > 0 ? `
+    <div class="prog-list">
+      ${scanProgress.map(p => `
+        <div class="p-row">
+          <span class="p-check">&#10003;</span>
+          <span class="p-name">${p.module}</span>
+          <span class="p-count ${p.issues > 0 ? 'p-has' : 'p-ok'}">${p.issues > 0 ? p.issues + ' issues' : 'clean'}</span>
+        </div>`).join('')}
+      <div class="p-row p-current">
+        <span class="p-dot"></span>
+        <span class="p-name">Scanning...</span>
+      </div>
+    </div>` : '';
+
+    // ── Scope pill ──────────────────────────────────────────────────
+    const scopePill = scanScope && store?.lastScan ? `
+      <span class="scope-pill">${scanScope}</span>` : '';
 
     const emptyState = !store?.lastScan ? `
     <div class="empty">
       <div class="e-title">Security Feed</div>
-      <div class="e-sub">Run a scan or let your AI agent call<br><code>ybe.scan_repo</code> via MCP.</div>
+      <div class="e-sub">Run a scan or right-click any file/folder.<br>Or let your AI agent call <code>ybe.scan_repo</code> via MCP.</div>
     </div>` : '';
 
     const allClear = store?.lastScan && openGroups.length === 0 ? `
@@ -157,7 +194,7 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--b);border-radius:3px}
 
 .hdr{padding:16px;border-bottom:1px solid var(--b)}
-.brand{font-size:13px;font-weight:600;letter-spacing:-.2px;margin-bottom:16px}.brand span{color:var(--g)}
+.brand{font-size:13px;font-weight:600;letter-spacing:-.2px;margin-bottom:12px}.brand span{color:var(--g)}
 
 .score-row{display:flex;align-items:flex-end;gap:8px}
 .score-num{font-size:52px;font-weight:800;line-height:.8;letter-spacing:-3px;color:${sc};font-variant-numeric:tabular-nums}
@@ -166,35 +203,50 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 .verdict{font-size:12px;font-weight:600}
 .v-ok{color:var(--g)}.v-warn{color:var(--a)}.v-bad{color:var(--r)}
 
-.bar{height:2px;background:var(--s2);border-radius:1px;margin:10px 0 12px;overflow:hidden}
+.bar{height:2px;background:var(--s2);border-radius:1px;margin:10px 0 8px;overflow:hidden}
 .bar-f{height:100%;border-radius:1px;background:${sc};width:${score!==null?Math.min(100,score):0}%;transition:width .8s ease}
 
-.summary{font-size:11px;color:var(--ts);margin-bottom:4px}
+.meta-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+.summary{font-size:11px;color:var(--ts)}
 .summary b{color:var(--t);font-weight:600}
+.last-scan{font-size:10px;color:var(--m)}
+.scope-pill{font-size:9px;font-weight:600;padding:2px 7px;border-radius:100px;background:var(--s2);border:1px solid var(--b);color:var(--ts);text-transform:uppercase;letter-spacing:.3px}
 
-.acts{padding:10px 16px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--b)}
-.btn-scan{flex:1;height:34px;background:var(--t);color:var(--bg);border:none;border-radius:var(--rad);font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s}
+.acts{padding:10px 16px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--b)}
+.btn-scan{flex:1;height:32px;background:var(--t);color:var(--bg);border:none;border-radius:var(--rad);font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s}
 .btn-scan:hover{opacity:.85}.btn-scan:disabled{background:var(--s2);color:var(--m);opacity:1;cursor:default}
-.auto-w{display:flex;align-items:center;gap:6px}
+.btn-changed{height:32px;padding:0 10px;background:var(--s2);color:var(--ts);border:1px solid var(--b);border-radius:var(--rad);font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .12s}
+.btn-changed:hover{border-color:var(--bh);color:var(--t)}.btn-changed:disabled{opacity:.4;cursor:default}
+.auto-w{display:flex;align-items:center;gap:5px;flex-shrink:0}
 .auto-l{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.3px}
-.tog{position:relative;width:30px;height:16px;cursor:pointer}
+.tog{position:relative;width:28px;height:15px;cursor:pointer}
 .tog input{opacity:0;width:0;height:0}
 .tsl{position:absolute;inset:0;background:var(--s2);border:1px solid var(--b);border-radius:8px;transition:.2s}
-.tsl::before{content:'';position:absolute;width:12px;height:12px;left:1px;top:50%;transform:translateY(-50%);background:var(--m);border-radius:50%;transition:.2s}
+.tsl::before{content:'';position:absolute;width:11px;height:11px;left:1px;top:50%;transform:translateY(-50%);background:var(--m);border-radius:50%;transition:.2s}
 .tog input:checked+.tsl{background:var(--gd);border-color:rgba(52,211,153,.3)}
-.tog input:checked+.tsl::before{transform:translate(14px,-50%);background:var(--g)}
+.tog input:checked+.tsl::before{transform:translate(13px,-50%);background:var(--g)}
 
 .scanning-bar{height:2px;background:var(--s);overflow:hidden}
 .scanning-p{width:30%;height:100%;background:var(--g);animation:sl 1.2s ease-in-out infinite}
 @keyframes sl{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
 
+/* ── Streaming progress ── */
+.prog-list{padding:10px 16px;border-bottom:1px solid var(--b)}
+.p-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px}
+.p-check{color:var(--g);font-size:10px;width:12px;flex-shrink:0}
+.p-dot{width:6px;height:6px;border-radius:50%;background:var(--g);animation:pulse 1s ease-in-out infinite;flex-shrink:0;margin-left:3px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.p-current{color:var(--ts)}
+.p-name{flex:1;color:var(--ts)}
+.p-count{font-size:10px;font-weight:600}
+.p-has{color:var(--a)}.p-ok{color:var(--m)}
+
 .section-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--m);padding:12px 16px 8px}
 
-/* ── ISSUES ── */
+/* ── Issues ── */
 .issues{padding:0 16px 12px}
 .issue{background:var(--s);border:1px solid var(--b);border-radius:var(--rad);margin-bottom:4px;overflow:hidden;transition:border-color .15s}
-.issue:hover{border-color:var(--bh)}
-.issue.open{border-color:var(--g)}
+.issue:hover{border-color:var(--bh)}.issue.open{border-color:var(--g)}
 .i-head{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
 .i-head:hover{background:var(--s2)}
 .i-left{display:flex;align-items:center;gap:6px;flex-shrink:0}
@@ -207,7 +259,6 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 .i-meta{font-size:10px;color:var(--m)}
 .chev{color:var(--m);transition:transform .15s;flex-shrink:0}
 .issue.open .chev{transform:rotate(90deg)}
-
 .i-body{display:none;padding:0 12px 12px;border-top:1px solid var(--b)}
 .issue.open .i-body{display:block}
 .f-list{margin-top:8px}
@@ -220,15 +271,13 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 .g-btn{background:var(--gd);color:var(--g);border-color:rgba(52,211,153,.2)}
 .g-btn:hover{background:rgba(52,211,153,.2);border-color:rgba(52,211,153,.35)}
 
-.more-toggle{padding:10px 0;text-align:center;font-size:11px;color:var(--m);cursor:pointer;transition:color .1s}
+.more-toggle{padding:10px 0;text-align:center;font-size:11px;color:var(--m);cursor:pointer}
 .more-toggle:hover{color:var(--ts)}
-.more-list{display:none}
-.more-list.show{display:block}
+.more-list{display:none}.more-list.show{display:block}
 
 .resolved-bar{padding:8px 16px;display:flex;gap:6px;border-top:1px solid var(--b)}
 .r-pill{font-size:10px;padding:2px 8px;border-radius:100px;background:var(--s);border:1px solid var(--b);color:var(--m)}
 .r-fixed{color:var(--g);border-color:rgba(52,211,153,.2)}
-.r-ignored{color:var(--m)}
 
 .empty,.clear{padding:40px 16px;text-align:center}
 .e-title{font-size:13px;font-weight:600;color:var(--t);margin-bottom:6px}
@@ -257,15 +306,18 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
     </div>
   </div>
   <div class="bar"><div class="bar-f"></div></div>
-  <div class="summary">
+  <div class="meta-row">
     ${openGroups.length > 0
-      ? `<b>${openGroups.length}</b> issue${openGroups.length > 1 ? 's' : ''} to fix before shipping`
-      : 'No issues found'}
+      ? `<span class="summary"><b>${openGroups.length}</b> issue${openGroups.length !== 1 ? 's' : ''} to fix</span>`
+      : '<span class="summary">No issues found</span>'}
+    ${lastAgo ? `<span class="last-scan">· ${lastAgo}</span>` : ''}
+    ${scopePill}
   </div>` : ''}
 </div>
 
 <div class="acts">
   <button class="btn-scan" id="scan-btn" ${scanning ? 'disabled' : ''}>${scanning ? 'Scanning...' : 'Run scan'}</button>
+  <button class="btn-changed" id="changed-btn" ${scanning ? 'disabled' : ''}>Changed</button>
   <div class="auto-w">
     <span class="auto-l">Auto</span>
     <label class="tog"><input type="checkbox" id="auto-cb" ${autoScan ? 'checked' : ''}><span class="tsl"></span></label>
@@ -273,6 +325,7 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 </div>
 
 ${scanning ? '<div class="scanning-bar"><div class="scanning-p"></div></div>' : ''}
+${progressHtml}
 
 ${emptyState}
 ${allClear}
@@ -311,35 +364,20 @@ ${resolvedHtml}
     return issue ? (issue.getAttribute('data-ids') || '').split(',') : [];
   }
 
-  // Scan button
-  var scanBtn = document.getElementById('scan-btn');
-  if (scanBtn) scanBtn.addEventListener('click', function(){ vscode.postMessage({type:'runScan'}); });
+  document.getElementById('scan-btn')?.addEventListener('click', function(){ vscode.postMessage({type:'runScan'}); });
+  document.getElementById('changed-btn')?.addEventListener('click', function(){ vscode.postMessage({type:'runChanged'}); });
+  document.getElementById('auto-cb')?.addEventListener('change', function(){ vscode.postMessage({type:'toggleAutoScan', value: this.checked}); });
+  document.getElementById('exp-btn')?.addEventListener('click', function(){ vscode.postMessage({type:'exportReport'}); });
 
-  // Auto toggle
-  var autoCb = document.getElementById('auto-cb');
-  if (autoCb) autoCb.addEventListener('change', function(){ vscode.postMessage({type:'toggleAutoScan', value: this.checked}); });
-
-  // Export
-  var expBtn = document.getElementById('exp-btn');
-  if (expBtn) expBtn.addEventListener('click', function(){ vscode.postMessage({type:'exportReport'}); });
-
-  // Event delegation for everything inside the body
   document.body.addEventListener('click', function(e) {
-    var target = e.target;
-
-    // Walk up to find actionable element
-    var el = target;
+    var el = e.target;
     while (el && el !== document.body) {
-
-      // Toggle issue expand/collapse
       var toggleAttr = el.getAttribute('data-toggle');
       if (toggleAttr !== null) {
         var issue = document.getElementById('issue-' + toggleAttr);
         if (issue) issue.classList.toggle('open');
         return;
       }
-
-      // Action buttons (fix, done, ignore)
       var action = el.getAttribute('data-action');
       if (action) {
         var ids = getIds(el);
@@ -353,18 +391,16 @@ ${resolvedHtml}
           toast('Ignored ' + ids.length, 'ok');
         } else if (action === 'show-more') {
           var list = document.getElementById('more-list');
-          var btn = document.getElementById('more-btn');
-          if (list) { list.classList.toggle('show'); }
-          if (btn) { btn.style.display = (list && list.classList.contains('show')) ? 'none' : 'block'; }
+          var btn  = document.getElementById('more-btn');
+          if (list) list.classList.toggle('show');
+          if (btn)  btn.style.display = (list && list.classList.contains('show')) ? 'none' : 'block';
         }
         return;
       }
-
       el = el.parentElement;
     }
   });
 
-  // Messages from extension host
   window.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'toast') toast(e.data.text, e.data.style || '');
   });

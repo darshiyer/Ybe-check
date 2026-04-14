@@ -10,10 +10,25 @@ Detects structural security issues that keyword-based scanners miss:
 Pure static analysis via regex on AST-like patterns. No external tools.
 """
 
+import fnmatch
 import os
 import re
 
 NAME = "Code Quality"
+
+# Shared scan-context globals (set by CLI before scanning)
+try:
+    import modules._utils as _cq_shared
+except ImportError:
+    _cq_shared = None
+
+
+def _get_include():
+    return getattr(_cq_shared, 'SCAN_INCLUDE_PATHS', None) if _cq_shared else None
+
+
+def _get_exclude():
+    return getattr(_cq_shared, 'SCAN_EXCLUDE_PATTERNS', []) if _cq_shared else []
 
 _SCANNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,6 +72,8 @@ _EVAL_RE = re.compile(r'\b(eval|exec)\s*\(\s*[a-zA-Z_]')
 
 
 def _walk_files(repo_path):
+    include = _get_include()
+    exclude = _get_exclude()
     for dirpath, dirnames, filenames in os.walk(repo_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         _real = os.path.realpath(dirpath)
@@ -67,7 +84,16 @@ def _walk_files(repo_path):
             ext = os.path.splitext(fname)[1].lower()
             if ext not in CODE_EXTENSIONS or ext in SKIP_EXTENSIONS:
                 continue
-            yield os.path.join(dirpath, fname)
+            full = os.path.join(dirpath, fname)
+            if include is not None:
+                real_full = os.path.realpath(full)
+                if not any(real_full == p or real_full.startswith(p + os.sep) for p in include):
+                    continue
+            if exclude:
+                rel = os.path.relpath(full, repo_path)
+                if any(fnmatch.fnmatch(rel, pat) for pat in exclude):
+                    continue
+            yield full
 
 
 def _check_silent_except(lines, fpath, repo_path):

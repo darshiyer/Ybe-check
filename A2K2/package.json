@@ -114,6 +114,21 @@
         "icon": "$(play)"
       },
       {
+        "command": "ybe-check.scanChanged",
+        "title": "Ybe Check: Scan Changed Files (git diff)",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.scanFile",
+        "title": "Ybe Check: Scan this File",
+        "category": "Ybe Check"
+      },
+      {
+        "command": "ybe-check.scanFolder",
+        "title": "Ybe Check: Scan this Folder",
+        "category": "Ybe Check"
+      },
+      {
         "command": "ybe-check.toggleAutoScan",
         "title": "Ybe Check: Toggle Auto-Scan on Save"
       },
@@ -129,6 +144,12 @@
           "type": "string",
           "default": "python3",
           "description": "Path to the Python executable."
+        },
+        "ybe-check.excludePatterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Glob patterns (relative to repo root) to exclude from all scans. Example: [\"legacy/**\", \"vendor/**\", \"generated/**\"]"
         }
       }
     },
@@ -158,6 +179,18 @@
           "command": "ybe-check.runSidebarScan",
           "when": "view == ybeCheck.sidebar",
           "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "ybe-check.scanFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "ybe-check@1"
+        },
+        {
+          "command": "ybe-check.scanFolder",
+          "when": "explorerResourceIsFolder",
+          "group": "ybe-check@1"
         }
       ]
     },
