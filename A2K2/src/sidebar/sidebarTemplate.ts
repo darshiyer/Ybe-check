@@ -102,7 +102,7 @@ export function getSidebarHtml(input: SidebarInput, nonce: string): string {
     function renderGroup(g: FindingGroup, idx: number): string {
         const idsAttr  = g.ids.join(',');
         const filesHtml = g.files.map(f =>
-            `<div class="f-loc">${shortPath(f.path)}${f.line ? ':' + f.line : ''}</div>`
+            `<div class="f-loc f-link" data-file="${f.path}" data-line="${f.line || 0}">${shortPath(f.path)}${f.line ? ':' + f.line : ''}</div>`
         ).join('');
         const moreFiles = g.count > g.files.length
             ? `<div class="f-loc f-more">+ ${g.count - g.files.length} more</div>`
@@ -143,10 +143,34 @@ export function getSidebarHtml(input: SidebarInput, nonce: string): string {
         ${rest.map((g, i) => renderGroup(g, 100 + i)).join('')}
       </div>` : '';
 
+    // Fixed/ignored groups for reopen UI
+    const fixedGroups   = groupFindings(findings.filter(f => f.status === 'fixed'));
+    const ignoredGroups = groupFindings(findings.filter(f => f.status === 'ignored'));
+
     const resolvedHtml = (fixedCount > 0 || ignoredCount > 0) ? `
       <div class="resolved-bar">
-        ${fixedCount   > 0 ? `<span class="r-pill r-fixed">${fixedCount} fixed</span>`     : ''}
-        ${ignoredCount > 0 ? `<span class="r-pill r-ignored">${ignoredCount} ignored</span>` : ''}
+        ${fixedCount > 0 ? `
+        <details class="r-details">
+          <summary class="r-pill r-fixed">${fixedCount} fixed</summary>
+          <div class="r-list">
+            ${fixedGroups.map(g => `
+              <div class="r-row">
+                <span class="r-type">${g.type}</span>
+                <button class="r-reopen" data-ids="${g.ids.join(',')}" data-action="reopen">Reopen</button>
+              </div>`).join('')}
+          </div>
+        </details>` : ''}
+        ${ignoredCount > 0 ? `
+        <details class="r-details">
+          <summary class="r-pill r-ignored">${ignoredCount} ignored</summary>
+          <div class="r-list">
+            ${ignoredGroups.map(g => `
+              <div class="r-row">
+                <span class="r-type">${g.type}</span>
+                <button class="r-reopen" data-ids="${g.ids.join(',')}" data-action="reopen">Reopen</button>
+              </div>`).join('')}
+          </div>
+        </details>` : ''}
       </div>` : '';
 
     // ── Scanning progress rows ──────────────────────────────────────
@@ -264,6 +288,7 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 .f-list{margin-top:8px}
 .f-loc{font-family:'SF Mono','Cascadia Code',monospace;font-size:10px;color:var(--ts);padding:2px 0}
 .f-more{color:var(--m);font-style:italic}
+.f-link{cursor:pointer;text-decoration:none}.f-link:hover{color:var(--g);text-decoration:underline}
 .i-reason{font-size:10px;color:var(--ts);margin-top:8px;padding:8px;background:var(--bg);border-radius:4px;line-height:1.4}
 .i-actions{display:flex;gap:4px;margin-top:10px}
 .btn{height:26px;padding:0 12px;border-radius:var(--rad);border:1px solid var(--b);background:var(--s2);color:var(--ts);font-size:10px;font-weight:500;cursor:pointer;transition:all .12s}
@@ -276,8 +301,17 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 .more-list{display:none}.more-list.show{display:block}
 
 .resolved-bar{padding:8px 16px;display:flex;gap:6px;border-top:1px solid var(--b)}
-.r-pill{font-size:10px;padding:2px 8px;border-radius:100px;background:var(--s);border:1px solid var(--b);color:var(--m)}
+.r-pill{font-size:10px;padding:2px 8px;border-radius:100px;background:var(--s);border:1px solid var(--b);color:var(--m);cursor:pointer;list-style:none}
 .r-fixed{color:var(--g);border-color:rgba(52,211,153,.2)}
+.r-details{display:inline-block}
+.r-details summary{display:inline-flex;align-items:center;gap:4px}
+.r-details summary::marker,.r-details summary::-webkit-details-marker{display:none}
+.r-list{margin-top:6px;background:var(--s2);border:1px solid var(--b);border-radius:var(--rad);overflow:hidden}
+.r-row{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;font-size:10px;border-bottom:1px solid var(--b)}
+.r-row:last-child{border-bottom:none}
+.r-type{color:var(--ts);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-reopen{background:none;border:1px solid var(--b);color:var(--m);font-size:9px;padding:1px 7px;border-radius:4px;cursor:pointer;flex-shrink:0;margin-left:8px}
+.r-reopen:hover{border-color:var(--bh);color:var(--t)}
 
 .empty,.clear{padding:40px 16px;text-align:center}
 .e-title{font-size:13px;font-weight:600;color:var(--t);margin-bottom:6px}
@@ -307,9 +341,9 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
   </div>
   <div class="bar"><div class="bar-f"></div></div>
   <div class="meta-row">
-    ${openGroups.length > 0
-      ? `<span class="summary"><b>${openGroups.length}</b> issue${openGroups.length !== 1 ? 's' : ''} to fix</span>`
-      : '<span class="summary">No issues found</span>'}
+    ${counts.open > 0
+      ? `<span class="summary"><b>${counts.open}</b> finding${counts.open !== 1 ? 's' : ''} open</span>`
+      : '<span class="summary">No open issues</span>'}
     ${lastAgo ? `<span class="last-scan">· ${lastAgo}</span>` : ''}
     ${scopePill}
   </div>` : ''}
@@ -317,7 +351,7 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 
 <div class="acts">
   <button class="btn-scan" id="scan-btn" ${scanning ? 'disabled' : ''}>${scanning ? 'Scanning...' : 'Run scan'}</button>
-  <button class="btn-changed" id="changed-btn" ${scanning ? 'disabled' : ''}>Changed</button>
+  <button class="btn-changed" id="changed-btn" title="Scan only files changed since last commit (git diff)" ${scanning ? 'disabled' : ''}>Changed</button>
   <div class="auto-w">
     <span class="auto-l">Auto</span>
     <label class="tog"><input type="checkbox" id="auto-cb" ${autoScan ? 'checked' : ''}><span class="tsl"></span></label>
@@ -372,12 +406,22 @@ ${resolvedHtml}
   document.body.addEventListener('click', function(e) {
     var el = e.target;
     while (el && el !== document.body) {
+
+      // Clickable file path — open in editor
+      if (el.classList && el.classList.contains('f-link') && !el.classList.contains('f-more')) {
+        var file = el.getAttribute('data-file');
+        var line = parseInt(el.getAttribute('data-line') || '0', 10);
+        if (file) vscode.postMessage({type:'openFile', file: file, line: line});
+        return;
+      }
+
       var toggleAttr = el.getAttribute('data-toggle');
       if (toggleAttr !== null) {
         var issue = document.getElementById('issue-' + toggleAttr);
         if (issue) issue.classList.toggle('open');
         return;
       }
+
       var action = el.getAttribute('data-action');
       if (action) {
         var ids = getIds(el);
@@ -389,6 +433,9 @@ ${resolvedHtml}
         } else if (action === 'ignore') {
           ids.forEach(function(id){ vscode.postMessage({type:'setStatus', findingId:id, status:'ignored'}); });
           toast('Ignored ' + ids.length, 'ok');
+        } else if (action === 'reopen') {
+          ids.forEach(function(id){ vscode.postMessage({type:'setStatus', findingId:id, status:'open'}); });
+          toast('Reopened', 'ok');
         } else if (action === 'show-more') {
           var list = document.getElementById('more-list');
           var btn  = document.getElementById('more-btn');

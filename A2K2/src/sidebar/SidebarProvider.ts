@@ -6,14 +6,11 @@
 import * as vscode from 'vscode';
 import * as path   from 'path';
 import * as crypto from 'crypto';
-import { exec, spawn }  from 'child_process';
-import { promisify }    from 'util';
+import { spawn } from 'child_process';
 
 import { SecurityStore, StoreData, FindingStatus } from './store';
 import { getSidebarHtml, ModuleProgress }          from './sidebarTemplate';
 import { buildAiPrompt }                           from './promptBuilder';
-
-const execAsync = promisify(exec);
 
 function getNonce(): string {
     return crypto.randomBytes(16).toString('hex');
@@ -75,12 +72,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(msg => {
             switch (msg.type) {
-                case 'runScan':       this.runScan(); break;
-                case 'runChanged':    this.runChangedScan(); break;
+                case 'runScan':        this.runScan(); break;
+                case 'runChanged':     this.runChangedScan(); break;
                 case 'toggleAutoScan': this._setAutoScan(msg.value); break;
-                case 'setStatus':     this._handleSetStatus(msg.findingId, msg.status); break;
-                case 'fixWithAgent':  this._handleFixWithAgent(msg.findingId); break;
-                case 'exportReport':  this._exportReport(); break;
+                case 'setStatus':      this._handleSetStatus(msg.findingId, msg.status); break;
+                case 'fixWithAgent':   this._handleFixWithAgent(msg.findingId); break;
+                case 'exportReport':   this._exportReport(); break;
+                case 'openFile':       this._openFileAtLine(msg.file, msg.line); break;
             }
         }, undefined, this._context.subscriptions);
     }
@@ -294,6 +292,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         await vscode.env.clipboard.writeText(prompt);
         try { await vscode.commands.executeCommand('claude-vscode.sidebar.open'); } catch {}
         this._view?.webview.postMessage({ type: 'toast', text: 'Prompt copied — Cmd+V', style: 'ok' });
+    }
+
+    private async _openFileAtLine(file: string, line: number): Promise<void> {
+        const root = getWorkspaceRoot();
+        if (!root || !file) { return; }
+        const abs = path.isAbsolute(file) ? file : path.join(root, file);
+        try {
+            const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(abs));
+            const ed  = await vscode.window.showTextDocument(doc, { preview: true });
+            const ln  = typeof line === 'number' && line >= 1 ? line - 1 : 0;
+            const pos = new vscode.Position(ln, 0);
+            ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+            ed.selection = new vscode.Selection(pos, pos);
+        } catch { /* file may have moved */ }
     }
 
     private _handleSetStatus(findingId: string, status: FindingStatus): void {
