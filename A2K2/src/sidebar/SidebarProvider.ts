@@ -9,7 +9,7 @@ import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 
 import { SecurityStore, StoreData, FindingStatus } from './store';
-import { getSidebarHtml, ModuleProgress }          from './sidebarTemplate';
+import { getSidebarHtml, ModuleProgress, SidebarSettings } from './sidebarTemplate';
 import { buildAiPrompt }                           from './promptBuilder';
 
 function getNonce(): string {
@@ -42,13 +42,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _fileWatcher?: vscode.FileSystemWatcher;
     private _autoScanDisposable?: vscode.Disposable;
     private _scanning = false;
-    private _autoScan = false;
+    private _settings: SidebarSettings = { scope: 'full', pathFilter: '', autoScan: false };
     private _scanProgress: ModuleProgress[] = [];
-    private _scanScope = '';
 
     constructor(context: vscode.ExtensionContext) {
         this._context = context;
-        this._autoScan = context.globalState.get('ybeAutoScan', false);
+        this._settings = {
+            scope: context.globalState.get<SidebarSettings['scope']>('ybeScanScope', 'full'),
+            pathFilter: context.globalState.get('ybeScanPathFilter', ''),
+            autoScan: context.globalState.get('ybeAutoScan', false),
+        };
 
         const root = getWorkspaceRoot();
         if (root) {
@@ -56,7 +59,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this._watchStore(root);
         }
 
-        if (this._autoScan) {
+        if (this._settings.autoScan) {
             this._enableAutoScan();
         }
     }
@@ -72,13 +75,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(msg => {
             switch (msg.type) {
-                case 'runScan':        this.runScan(); break;
-                case 'runChanged':     this.runChangedScan(); break;
-                case 'toggleAutoScan': this._setAutoScan(msg.value); break;
-                case 'setStatus':      this._handleSetStatus(msg.findingId, msg.status); break;
-                case 'fixWithAgent':   this._handleFixWithAgent(msg.findingId); break;
-                case 'exportReport':   this._exportReport(); break;
-                case 'openFile':       this._openFileAtLine(msg.file, msg.line); break;
+                case 'runScan':         this._runScanByScope(); break;
+                case 'toggleAutoScan':  this._setAutoScan(msg.value); break;
+                case 'updateSettings':  this._handleUpdateSettings(msg); break;
+                case 'setStatus':       this._handleSetStatus(msg.findingId, msg.status); break;
+                case 'fixWithAgent':    this._handleFixWithAgent(msg.findingId); break;
+                case 'exportReport':    this._exportReport(); break;
+                case 'openFile':        this._openFileAtLine(msg.file, msg.line); break;
             }
         }, undefined, this._context.subscriptions);
     }
@@ -127,7 +130,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         this._scanning = true;
         this._scanProgress = [];
-        this._scanScope = opts.scope;
         this._render();
 
         const python  = getPythonPath();
@@ -206,17 +208,40 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._view.webview.html = getSidebarHtml({
             store: this._store?.data ?? null,
             scanning: this._scanning,
-            autoScan: this._autoScan,
+            settings: this._settings,
             counts: this._store?.getCounts() ?? { open: 0, fixed: 0, ignored: 0, total: 0, new: 0 },
             scanProgress: this._scanProgress,
-            scanScope: this._scanScope,
         }, nonce);
     }
 
     // ── Auto-scan ────────────────────────────────────────────────────
 
+    private _runScanByScope(): void {
+        const { scope, pathFilter } = this._settings;
+        if (scope === 'changed') {
+            this.runChangedScan();
+        } else if (scope === 'path' && pathFilter) {
+            this.runPathScan(pathFilter);
+        } else {
+            this.runScan();
+        }
+    }
+
+    private _handleUpdateSettings(msg: { scope?: string; pathFilter?: string }): void {
+        if (msg.scope && ['full', 'changed', 'path'].includes(msg.scope)) {
+            const scope = msg.scope as SidebarSettings['scope'];
+            this._settings = { ...this._settings, scope };
+            this._context.globalState.update('ybeScanScope', scope);
+        }
+        if (msg.pathFilter !== undefined) {
+            this._settings = { ...this._settings, pathFilter: msg.pathFilter };
+            this._context.globalState.update('ybeScanPathFilter', msg.pathFilter);
+        }
+        this._render();
+    }
+
     private _setAutoScan(on: boolean): void {
-        this._autoScan = on;
+        this._settings = { ...this._settings, autoScan: on };
         this._context.globalState.update('ybeAutoScan', on);
         if (on) { this._enableAutoScan(); } else { this._disableAutoScan(); }
     }

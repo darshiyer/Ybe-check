@@ -1,6 +1,6 @@
 /**
  * sidebarTemplate.ts
- * Security inbox — streaming progress, scope indicator, last-scanned age.
+ * Security inbox — verdict bar, flat to-do list, settings panel, resolved section.
  */
 
 import { StoreData, StoredFinding } from './store';
@@ -13,42 +13,21 @@ export interface ModuleProgress {
     done: boolean;
 }
 
+export interface SidebarSettings {
+    scope: 'full' | 'changed' | 'path';
+    pathFilter: string;
+    autoScan: boolean;
+}
+
 export interface SidebarInput {
     store: StoreData | null;
     scanning: boolean;
-    autoScan: boolean;
+    settings: SidebarSettings;
     counts: { open: number; fixed: number; ignored: number; total: number; new: number };
     scanProgress: ModuleProgress[];
-    scanScope: string;
 }
 
-interface FindingGroup {
-    type: string;
-    module: string;
-    severity: string;
-    count: number;
-    files: { path: string; line: number | string }[];
-    ids: string[];
-    reason: string;
-    hasNew: boolean;
-}
-
-function groupFindings(findings: StoredFinding[]): FindingGroup[] {
-    const map = new Map<string, FindingGroup>();
-    for (const f of findings) {
-        const key = `${f.module}::${f.type}::${f.severity}`;
-        let g = map.get(key);
-        if (!g) {
-            g = { type: f.type, module: f.module, severity: f.severity, count: 0, files: [], ids: [], reason: f.reason || '', hasNew: false };
-            map.set(key, g);
-        }
-        g.count++;
-        g.ids.push(f.id);
-        if (f.isNew) { g.hasNew = true; }
-        if (g.files.length < 5) { g.files.push({ path: f.file, line: f.line }); }
-    }
-    return Array.from(map.values());
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SEV_W: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 
@@ -60,323 +39,391 @@ function scoreColor(s: number | null): string {
 }
 
 function shortPath(p: string): string {
-    return p.length > 35 ? '...' + p.slice(-33) : p;
+    return p.length > 38 ? '...' + p.slice(-36) : p;
 }
 
 function timeAgo(iso: string | null): string {
     if (!iso) { return ''; }
     const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (diff < 60) { return 'just now'; }
-    if (diff < 3600) { return `${Math.floor(diff / 60)}m ago`; }
+    if (diff < 60)    { return `${diff}s ago`; }
+    if (diff < 3600)  { return `${Math.floor(diff / 60)}m ago`; }
     if (diff < 86400) { return `${Math.floor(diff / 3600)}h ago`; }
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
+// ── Finding grouping (by type+severity, NOT by module) ────────────────────────
+
+interface FindingRow {
+    type: string;
+    severity: string;
+    count: number;
+    ids: string[];
+    files: { path: string; line: number | string }[];
+    reason: string;
+    hasNew: boolean;
+}
+
+function buildRows(findings: StoredFinding[]): FindingRow[] {
+    const map = new Map<string, FindingRow>();
+    for (const f of findings) {
+        const key = `${f.severity}::${f.type}`;
+        let row = map.get(key);
+        if (!row) {
+            row = { type: f.type, severity: f.severity, count: 0, ids: [], files: [], reason: f.reason || '', hasNew: false };
+            map.set(key, row);
+        }
+        row.count++;
+        row.ids.push(f.id);
+        if (f.isNew) { row.hasNew = true; }
+        if (row.files.length < 8) { row.files.push({ path: f.file, line: f.line }); }
+    }
+    return Array.from(map.values())
+        .sort((a, b) => (SEV_W[b.severity] || 0) - (SEV_W[a.severity] || 0));
+}
+
+// ── HTML render ──────────────────────────────────────────────────────────────
+
 export function getSidebarHtml(input: SidebarInput, nonce: string): string {
-    const { store, scanning, autoScan, counts, scanProgress, scanScope } = input;
-    const score = store?.currentScore ?? null;
-    const sc = scoreColor(score);
+    const { store, scanning, settings, counts, scanProgress } = input;
+    const score    = store?.currentScore ?? null;
+    const sc       = scoreColor(score);
     const findings = store?.findings || [];
-    const lastAgo = timeAgo(store?.lastScan ?? null);
+    const lastAgo  = timeAgo(store?.lastScan ?? null);
+    const hasScanned = !!store?.lastScan;
 
-    const openGroups = groupFindings(findings.filter(f => f.status === 'open'))
-        .sort((a, b) => {
-            const sd = (SEV_W[b.severity] || 0) - (SEV_W[a.severity] || 0);
-            return sd !== 0 ? sd : b.count - a.count;
-        });
+    const openFindings   = findings.filter(f => f.status === 'open');
+    const fixedFindings  = findings.filter(f => f.status === 'fixed');
+    const ignoredFindings = findings.filter(f => f.status === 'ignored');
 
-    const fixedCount   = findings.filter(f => f.status === 'fixed').length;
-    const ignoredCount = findings.filter(f => f.status === 'ignored').length;
+    const openRows    = buildRows(openFindings);
+    const fixedRows   = buildRows(fixedFindings);
+    const ignoredRows = buildRows(ignoredFindings);
 
-    const top  = openGroups.slice(0, 5);
-    const rest = openGroups.slice(5);
+    // Verdict
+    let verdictDot = '#555';
+    let verdictLabel = '';
+    let verdictSub = '';
+    if (scanning) {
+        verdictDot = '#e8a959';
+        verdictLabel = 'Scanning…';
+        verdictSub = scanProgress.length > 0
+            ? `${scanProgress.length} modules done`
+            : 'Starting…';
+    } else if (hasScanned) {
+        if (score !== null && score >= 80)      { verdictDot = '#34d399'; verdictLabel = 'Ready to ship'; }
+        else if (score !== null && score >= 40) { verdictDot = '#e8a959'; verdictLabel = 'Needs work'; }
+        else if (score !== null)                { verdictDot = '#ff6166'; verdictLabel = 'Not ready'; }
 
-    let verdictText = '';
-    let verdictClass = '';
-    if (store?.lastScan) {
-        if (score !== null && score >= 80)      { verdictText = 'Ready to ship'; verdictClass = 'v-ok'; }
-        else if (score !== null && score >= 40) { verdictText = 'Needs work';    verdictClass = 'v-warn'; }
-        else if (score !== null)                { verdictText = 'Not ready';     verdictClass = 'v-bad'; }
+        const critical = openFindings.filter(f => f.severity === 'critical').length;
+        const high     = openFindings.filter(f => f.severity === 'high').length;
+        if (counts.open === 0) {
+            verdictSub = 'All clear — nothing open';
+        } else if (critical > 0) {
+            verdictSub = `${critical} critical issue${critical !== 1 ? 's' : ''} blocking deploy`;
+        } else if (high > 0) {
+            verdictSub = `${high} high-severity issue${high !== 1 ? 's' : ''} to fix`;
+        } else {
+            verdictSub = `${counts.open} open issue${counts.open !== 1 ? 's' : ''}`;
+        }
     }
 
-    function renderGroup(g: FindingGroup, idx: number): string {
-        const idsAttr  = g.ids.join(',');
-        const filesHtml = g.files.map(f =>
-            `<div class="f-loc f-link" data-file="${f.path}" data-line="${f.line || 0}">${shortPath(f.path)}${f.line ? ':' + f.line : ''}</div>`
+    // Settings scope label for scan button tooltip
+    const scopeLabel = settings.scope === 'changed' ? 'Scan changed files'
+        : settings.scope === 'path' && settings.pathFilter ? `Scan ${settings.pathFilter}`
+        : 'Run scan';
+
+    function renderRow(row: FindingRow, idx: number): string {
+        const idsAttr  = row.ids.join(',');
+        const fileCount = row.count > 1 ? `<span class="r-fc">${row.count} files</span>` : '';
+        const newBadge  = row.hasNew ? '<span class="r-new">new</span>' : '';
+        const filesHtml = row.files.map(f =>
+            `<div class="exp-file f-link" data-file="${f.path}" data-line="${f.line || 0}">${shortPath(f.path)}${f.line ? ':' + f.line : ''}</div>`
         ).join('');
-        const moreFiles = g.count > g.files.length
-            ? `<div class="f-loc f-more">+ ${g.count - g.files.length} more</div>`
-            : '';
+        const moreFiles = row.count > row.files.length
+            ? `<div class="exp-file exp-more">+ ${row.count - row.files.length} more</div>` : '';
+        const reasonHtml = row.reason
+            ? `<div class="exp-why">${row.reason.split('.')[0].trim()}.</div>` : '';
 
         return `
-        <div class="issue" id="issue-${idx}" data-ids="${idsAttr}">
-          <div class="i-head" data-toggle="${idx}">
-            <div class="i-left">
-              <span class="sev sev-${g.severity}">${g.severity}</span>
-              ${g.hasNew ? '<span class="new-dot"></span>' : ''}
-            </div>
-            <div class="i-mid">
-              <div class="i-type">${g.type}</div>
-              <div class="i-meta">${g.count} in ${g.module}</div>
-            </div>
-            <svg class="chev" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <div class="i-body">
-            <div class="f-list">${filesHtml}${moreFiles}</div>
-            ${g.reason ? `<div class="i-reason">${g.reason.slice(0, 180)}</div>` : ''}
-            <div class="i-actions">
-              <button class="btn g-btn" data-action="fix">Fix with AI</button>
-              <button class="btn" data-action="done">Done</button>
-              <button class="btn" data-action="ignore">Ignore</button>
-            </div>
-          </div>
-        </div>`;
+<div class="finding" id="fr-${idx}" data-ids="${idsAttr}">
+  <div class="f-row" data-toggle="${idx}">
+    <span class="sev sev-${row.severity}">${row.severity}</span>
+    <span class="f-title">${row.type}</span>
+    ${newBadge}
+    ${fileCount}
+    <svg class="f-chev" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5l3.5 3.5L3 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+  </div>
+  <div class="f-exp">
+    <div class="exp-files">${filesHtml}${moreFiles}</div>
+    ${reasonHtml}
+    <div class="exp-actions">
+      <button class="btn btn-fix" data-action="fix">Fix with AI</button>
+      <button class="btn btn-done" data-action="done">Done</button>
+      <button class="btn btn-ign" data-action="ignore">Ignore</button>
+    </div>
+  </div>
+</div>`;
     }
 
-    const topHtml = top.map((g, i) => renderGroup(g, i)).join('');
+    function renderResolved(rows: FindingRow[], label: string, cls: string): string {
+        if (rows.length === 0) { return ''; }
+        const count = rows.reduce((n, r) => n + r.count, 0);
+        const items = rows.map(row => {
+            const idsAttr = row.ids.join(',');
+            return `<div class="res-item">
+              <span class="res-type">${row.type}</span>
+              <button class="btn btn-reopen" data-action="reopen" data-ids="${idsAttr}">Reopen</button>
+            </div>`;
+        }).join('');
+        return `
+<details class="res-group">
+  <summary class="res-sum ${cls}">${label} <span class="res-n">${count}</span></summary>
+  <div class="res-list">${items}</div>
+</details>`;
+    }
 
-    const restHtml = rest.length > 0 ? `
-      <div class="more-toggle" id="more-btn" data-action="show-more">
-        + ${rest.length} more issue groups
-      </div>
-      <div class="more-list" id="more-list">
-        ${rest.map((g, i) => renderGroup(g, 100 + i)).join('')}
-      </div>` : '';
-
-    // Fixed/ignored groups for reopen UI
-    const fixedGroups   = groupFindings(findings.filter(f => f.status === 'fixed'));
-    const ignoredGroups = groupFindings(findings.filter(f => f.status === 'ignored'));
-
-    const resolvedHtml = (fixedCount > 0 || ignoredCount > 0) ? `
-      <div class="resolved-bar">
-        ${fixedCount > 0 ? `
-        <details class="r-details">
-          <summary class="r-pill r-fixed">${fixedCount} fixed</summary>
-          <div class="r-list">
-            ${fixedGroups.map(g => `
-              <div class="r-row">
-                <span class="r-type">${g.type}</span>
-                <button class="r-reopen" data-ids="${g.ids.join(',')}" data-action="reopen">Reopen</button>
-              </div>`).join('')}
-          </div>
-        </details>` : ''}
-        ${ignoredCount > 0 ? `
-        <details class="r-details">
-          <summary class="r-pill r-ignored">${ignoredCount} ignored</summary>
-          <div class="r-list">
-            ${ignoredGroups.map(g => `
-              <div class="r-row">
-                <span class="r-type">${g.type}</span>
-                <button class="r-reopen" data-ids="${g.ids.join(',')}" data-action="reopen">Reopen</button>
-              </div>`).join('')}
-          </div>
-        </details>` : ''}
-      </div>` : '';
-
-    // ── Scanning progress rows ──────────────────────────────────────
+    // ── Scanning progress (shown while scan runs) ──────────────────
     const progressHtml = scanning && scanProgress.length > 0 ? `
-    <div class="prog-list">
-      ${scanProgress.map(p => `
-        <div class="p-row">
-          <span class="p-check">&#10003;</span>
-          <span class="p-name">${p.module}</span>
-          <span class="p-count ${p.issues > 0 ? 'p-has' : 'p-ok'}">${p.issues > 0 ? p.issues + ' issues' : 'clean'}</span>
-        </div>`).join('')}
-      <div class="p-row p-current">
-        <span class="p-dot"></span>
-        <span class="p-name">Scanning...</span>
-      </div>
-    </div>` : '';
+<div class="prog-list">
+  ${scanProgress.map(p => `
+  <div class="prog-row">
+    <span class="prog-check">✓</span>
+    <span class="prog-name">${p.module}</span>
+    <span class="prog-n ${p.issues > 0 ? 'prog-has' : 'prog-ok'}">${p.issues > 0 ? p.issues : '—'}</span>
+  </div>`).join('')}
+  <div class="prog-row prog-cur">
+    <span class="prog-pulse"></span>
+    <span class="prog-name">Scanning…</span>
+  </div>
+</div>` : '';
 
-    // ── Scope pill ──────────────────────────────────────────────────
-    const scopePill = scanScope && store?.lastScan ? `
-      <span class="scope-pill">${scanScope}</span>` : '';
+    const findingsHtml = openRows.length > 0
+        ? openRows.map((r, i) => renderRow(r, i)).join('')
+        : hasScanned ? `<div class="all-clear"><div class="ac-icon">✓</div><div class="ac-text">All clear</div></div>` : '';
 
-    const emptyState = !store?.lastScan ? `
-    <div class="empty">
-      <div class="e-title">Security Feed</div>
-      <div class="e-sub">Run a scan or right-click any file/folder.<br>Or let your AI agent call <code>ybe.scan_repo</code> via MCP.</div>
-    </div>` : '';
+    const resolvedHtml = (fixedRows.length > 0 || ignoredRows.length > 0) ? `
+<div class="res-section">
+  ${renderResolved(fixedRows, 'Fixed', 'res-fixed')}
+  ${renderResolved(ignoredRows, 'Ignored', 'res-ign')}
+</div>` : '';
 
-    const allClear = store?.lastScan && openGroups.length === 0 ? `
-    <div class="clear">
-      <div class="clear-icon">&#10003;</div>
-      <div class="e-title">All clear</div>
-      <div class="e-sub">No open security issues.</div>
-    </div>` : '';
+    const emptyHtml = !hasScanned && !scanning ? `
+<div class="empty-state">
+  <button class="btn-first" id="first-scan-btn">Run your first scan</button>
+  <div class="empty-sub">Scans your repo for secrets, injection risks,<br>missing auth, insecure deps &amp; more.</div>
+</div>` : '';
 
     return /* html */`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{--bg:#0a0a0a;--s:#141414;--s2:#1a1a1a;--b:#262626;--bh:#333;--t:#ededed;--ts:#a1a1a1;--m:#666;--g:#34d399;--gd:rgba(52,211,153,.12);--r:#ff6166;--rd:rgba(255,97,102,.1);--a:#e8a959;--ad:rgba(232,169,89,.1);--bl:#6eb0f7;--rad:6px}
+:root{
+  --bg:#0a0a0a;--s:#141414;--s2:#1c1c1c;--b:#262626;--bh:#383838;
+  --t:#ededed;--ts:#a0a0a0;--m:#555;
+  --g:#34d399;--gd:rgba(52,211,153,.12);--ga:rgba(52,211,153,.25);
+  --r:#ff6166;--rd:rgba(255,97,102,.1);
+  --a:#e8a959;--ad:rgba(232,169,89,.1);
+  --bl:#6eb0f7;--bld:rgba(110,176,247,.1);
+  --rad:5px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-serif;font-size:12px;line-height:1.5;-webkit-font-smoothing:antialiased}
-::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--b);border-radius:3px}
+body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-serif;font-size:12px;line-height:1.5;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
 
-.hdr{padding:16px;border-bottom:1px solid var(--b)}
-.brand{font-size:13px;font-weight:600;letter-spacing:-.2px;margin-bottom:12px}.brand span{color:var(--g)}
+/* ── VERDICT BAR (sticky top) ── */
+.vbar{flex-shrink:0;padding:14px 14px 10px;border-bottom:1px solid var(--b);background:var(--bg)}
+.v-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.brand{font-size:12px;font-weight:700;letter-spacing:-.2px;color:var(--ts)}
+.brand b{color:var(--t)}
+.v-acts{display:flex;gap:6px;align-items:center}
+.v-scan{width:26px;height:26px;border-radius:var(--rad);border:1px solid var(--b);background:var(--t);color:var(--bg);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s}
+.v-scan:hover{opacity:.85}.v-scan:disabled{background:var(--s2);color:var(--m);cursor:default;border-color:var(--b)}
+.v-gear{width:26px;height:26px;border-radius:var(--rad);border:1px solid var(--b);background:none;color:var(--m);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.v-gear:hover{border-color:var(--bh);color:var(--t)}.v-gear.active{border-color:var(--g);color:var(--g)}
 
-.score-row{display:flex;align-items:flex-end;gap:8px}
-.score-num{font-size:52px;font-weight:800;line-height:.8;letter-spacing:-3px;color:${sc};font-variant-numeric:tabular-nums}
-.score-r{padding-bottom:6px}
-.score-lbl{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
-.verdict{font-size:12px;font-weight:600}
-.v-ok{color:var(--g)}.v-warn{color:var(--a)}.v-bad{color:var(--r)}
+.v-status{display:flex;align-items:center;gap:7px}
+.v-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${verdictDot}}
+${settings.autoScan && hasScanned && !scanning ? '.v-dot{animation:vp 2.5s ease-in-out infinite}@keyframes vp{0%,100%{opacity:1}50%{opacity:.35}}' : ''}
+.v-label{font-size:13px;font-weight:700;color:var(--t)}
+.v-sub{font-size:11px;color:var(--ts);margin-top:3px;display:flex;align-items:center;gap:8px}
+.v-time{color:var(--m);font-size:10px}
+.v-score{font-size:10px;font-weight:600;padding:1px 7px;border-radius:100px;background:var(--s2);color:${sc}}
 
-.bar{height:2px;background:var(--s2);border-radius:1px;margin:10px 0 8px;overflow:hidden}
-.bar-f{height:100%;border-radius:1px;background:${sc};width:${score!==null?Math.min(100,score):0}%;transition:width .8s ease}
-
-.meta-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
-.summary{font-size:11px;color:var(--ts)}
-.summary b{color:var(--t);font-weight:600}
-.last-scan{font-size:10px;color:var(--m)}
-.scope-pill{font-size:9px;font-weight:600;padding:2px 7px;border-radius:100px;background:var(--s2);border:1px solid var(--b);color:var(--ts);text-transform:uppercase;letter-spacing:.3px}
-
-.acts{padding:10px 16px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--b)}
-.btn-scan{flex:1;height:32px;background:var(--t);color:var(--bg);border:none;border-radius:var(--rad);font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s}
-.btn-scan:hover{opacity:.85}.btn-scan:disabled{background:var(--s2);color:var(--m);opacity:1;cursor:default}
-.btn-changed{height:32px;padding:0 10px;background:var(--s2);color:var(--ts);border:1px solid var(--b);border-radius:var(--rad);font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .12s}
-.btn-changed:hover{border-color:var(--bh);color:var(--t)}.btn-changed:disabled{opacity:.4;cursor:default}
-.auto-w{display:flex;align-items:center;gap:5px;flex-shrink:0}
-.auto-l{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.3px}
-.tog{position:relative;width:28px;height:15px;cursor:pointer}
-.tog input{opacity:0;width:0;height:0}
+/* ── SETTINGS PANEL ── */
+.settings{flex-shrink:0;border-bottom:1px solid var(--b);background:var(--s);padding:0;overflow:hidden;max-height:0;transition:max-height .2s ease,padding .2s}
+.settings.open{max-height:200px;padding:12px 14px}
+.s-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:11px}
+.s-row:last-child{margin-bottom:0}
+.s-label{color:var(--ts);width:52px;flex-shrink:0}
+.s-ctrl{flex:1;display:flex;align-items:center;gap:8px}
+.s-radio{display:flex;gap:6px}
+.s-radio label{display:flex;align-items:center;gap:3px;cursor:pointer;color:var(--ts)}
+.s-radio input{accent-color:var(--g);cursor:pointer}
+.s-radio label:has(input:checked){color:var(--t)}
+.s-input{flex:1;background:var(--bg);border:1px solid var(--b);border-radius:var(--rad);color:var(--t);font-size:11px;padding:4px 8px;outline:none}
+.s-input:focus{border-color:var(--g)}
+.s-input::placeholder{color:var(--m)}
+.tog{position:relative;width:28px;height:15px;cursor:pointer;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0;position:absolute}
 .tsl{position:absolute;inset:0;background:var(--s2);border:1px solid var(--b);border-radius:8px;transition:.2s}
 .tsl::before{content:'';position:absolute;width:11px;height:11px;left:1px;top:50%;transform:translateY(-50%);background:var(--m);border-radius:50%;transition:.2s}
-.tog input:checked+.tsl{background:var(--gd);border-color:rgba(52,211,153,.3)}
+.tog input:checked+.tsl{background:var(--gd);border-color:var(--ga)}
 .tog input:checked+.tsl::before{transform:translate(13px,-50%);background:var(--g)}
 
-.scanning-bar{height:2px;background:var(--s);overflow:hidden}
-.scanning-p{width:30%;height:100%;background:var(--g);animation:sl 1.2s ease-in-out infinite}
-@keyframes sl{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+/* ── SCAN PROGRESS ── */
+.prog-list{flex-shrink:0;padding:8px 14px;border-bottom:1px solid var(--b);background:var(--s)}
+.prog-row{display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0}
+.prog-check{color:var(--g);font-size:10px;width:12px}
+.prog-pulse{width:6px;height:6px;border-radius:50%;background:var(--a);animation:pp .9s ease-in-out infinite;margin-left:3px}
+@keyframes pp{0%,100%{opacity:1}50%{opacity:.2}}
+.prog-cur{color:var(--ts)}
+.prog-name{flex:1;color:var(--ts)}
+.prog-n{font-size:10px;font-weight:600;min-width:20px;text-align:right}
+.prog-has{color:var(--a)}.prog-ok{color:var(--m)}
 
-/* ── Streaming progress ── */
-.prog-list{padding:10px 16px;border-bottom:1px solid var(--b)}
-.p-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px}
-.p-check{color:var(--g);font-size:10px;width:12px;flex-shrink:0}
-.p-dot{width:6px;height:6px;border-radius:50%;background:var(--g);animation:pulse 1s ease-in-out infinite;flex-shrink:0;margin-left:3px}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.p-current{color:var(--ts)}
-.p-name{flex:1;color:var(--ts)}
-.p-count{font-size:10px;font-weight:600}
-.p-has{color:var(--a)}.p-ok{color:var(--m)}
+/* ── MAIN SCROLLABLE ── */
+.main{flex:1;overflow-y:auto;padding:0}
 
-.section-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--m);padding:12px 16px 8px}
-
-/* ── Issues ── */
-.issues{padding:0 16px 12px}
-.issue{background:var(--s);border:1px solid var(--b);border-radius:var(--rad);margin-bottom:4px;overflow:hidden;transition:border-color .15s}
-.issue:hover{border-color:var(--bh)}.issue.open{border-color:var(--g)}
-.i-head{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
-.i-head:hover{background:var(--s2)}
-.i-left{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.sev{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px}
-.sev-critical{background:var(--rd);color:var(--r)}.sev-high{background:var(--ad);color:var(--a)}
-.sev-medium{background:rgba(201,180,88,.1);color:#c9b458}.sev-low{background:rgba(110,176,247,.1);color:var(--bl)}
-.new-dot{width:6px;height:6px;border-radius:50%;background:var(--g);flex-shrink:0}
-.i-mid{flex:1;min-width:0}
-.i-type{font-size:12px;font-weight:500;color:var(--t);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.i-meta{font-size:10px;color:var(--m)}
-.chev{color:var(--m);transition:transform .15s;flex-shrink:0}
-.issue.open .chev{transform:rotate(90deg)}
-.i-body{display:none;padding:0 12px 12px;border-top:1px solid var(--b)}
-.issue.open .i-body{display:block}
-.f-list{margin-top:8px}
-.f-loc{font-family:'SF Mono','Cascadia Code',monospace;font-size:10px;color:var(--ts);padding:2px 0}
-.f-more{color:var(--m);font-style:italic}
-.f-link{cursor:pointer;text-decoration:none}.f-link:hover{color:var(--g);text-decoration:underline}
-.i-reason{font-size:10px;color:var(--ts);margin-top:8px;padding:8px;background:var(--bg);border-radius:4px;line-height:1.4}
-.i-actions{display:flex;gap:4px;margin-top:10px}
-.btn{height:26px;padding:0 12px;border-radius:var(--rad);border:1px solid var(--b);background:var(--s2);color:var(--ts);font-size:10px;font-weight:500;cursor:pointer;transition:all .12s}
+/* ── FINDINGS ── */
+.findings-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--m);padding:10px 14px 6px}
+.finding{border-bottom:1px solid var(--b)}
+.f-row{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;transition:background .1s}
+.f-row:hover{background:var(--s)}
+.finding.open .f-row{background:var(--s)}
+.sev{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px;flex-shrink:0}
+.sev-critical{background:var(--rd);color:var(--r)}
+.sev-high{background:var(--ad);color:var(--a)}
+.sev-medium{background:rgba(201,180,88,.1);color:#c9b458}
+.sev-low{background:var(--bld);color:var(--bl)}
+.f-title{flex:1;font-size:11px;font-weight:500;color:var(--t);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-new{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--gd);color:var(--g);flex-shrink:0}
+.r-fc{font-size:10px;color:var(--m);flex-shrink:0}
+.f-chev{color:var(--m);flex-shrink:0;transition:transform .15s}
+.finding.open .f-chev{transform:rotate(90deg)}
+.f-exp{display:none;padding:0 14px 12px;border-top:1px solid var(--b);background:var(--s)}
+.finding.open .f-exp{display:block}
+.exp-files{margin-top:8px;margin-bottom:6px}
+.exp-file{font-family:'SF Mono','Cascadia Code',monospace;font-size:10px;color:var(--ts);padding:2px 0}
+.f-link{cursor:pointer}.f-link:hover{color:var(--g);text-decoration:underline}
+.exp-more{color:var(--m);font-style:italic}
+.exp-why{font-size:10px;color:var(--ts);margin-bottom:10px;padding:6px 8px;background:var(--bg);border-radius:4px;line-height:1.5}
+.exp-actions{display:flex;gap:5px}
+.btn{height:24px;padding:0 10px;border-radius:var(--rad);border:1px solid var(--b);background:var(--s2);color:var(--ts);font-size:10px;font-weight:500;cursor:pointer;transition:all .1s}
 .btn:hover{border-color:var(--bh);color:var(--t)}
-.g-btn{background:var(--gd);color:var(--g);border-color:rgba(52,211,153,.2)}
-.g-btn:hover{background:rgba(52,211,153,.2);border-color:rgba(52,211,153,.35)}
+.btn-fix{background:var(--gd);color:var(--g);border-color:rgba(52,211,153,.2);font-weight:600}
+.btn-fix:hover{background:var(--ga);border-color:rgba(52,211,153,.4)}
 
-.more-toggle{padding:10px 0;text-align:center;font-size:11px;color:var(--m);cursor:pointer}
-.more-toggle:hover{color:var(--ts)}
-.more-list{display:none}.more-list.show{display:block}
+/* ── ALL CLEAR ── */
+.all-clear{padding:48px 14px;text-align:center}
+.ac-icon{font-size:32px;color:var(--g);margin-bottom:8px}
+.ac-text{font-size:13px;font-weight:600;color:var(--t)}
 
-.resolved-bar{padding:8px 16px;display:flex;gap:6px;border-top:1px solid var(--b)}
-.r-pill{font-size:10px;padding:2px 8px;border-radius:100px;background:var(--s);border:1px solid var(--b);color:var(--m);cursor:pointer;list-style:none}
-.r-fixed{color:var(--g);border-color:rgba(52,211,153,.2)}
-.r-details{display:inline-block}
-.r-details summary{display:inline-flex;align-items:center;gap:4px}
-.r-details summary::marker,.r-details summary::-webkit-details-marker{display:none}
-.r-list{margin-top:6px;background:var(--s2);border:1px solid var(--b);border-radius:var(--rad);overflow:hidden}
-.r-row{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;font-size:10px;border-bottom:1px solid var(--b)}
-.r-row:last-child{border-bottom:none}
-.r-type{color:var(--ts);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.r-reopen{background:none;border:1px solid var(--b);color:var(--m);font-size:9px;padding:1px 7px;border-radius:4px;cursor:pointer;flex-shrink:0;margin-left:8px}
-.r-reopen:hover{border-color:var(--bh);color:var(--t)}
+/* ── EMPTY STATE ── */
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center;gap:16px}
+.btn-first{height:36px;padding:0 24px;background:var(--t);color:var(--bg);border:none;border-radius:var(--rad);font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s}
+.btn-first:hover{opacity:.85}
+.empty-sub{font-size:11px;color:var(--m);line-height:1.7}
 
-.empty,.clear{padding:40px 16px;text-align:center}
-.e-title{font-size:13px;font-weight:600;color:var(--t);margin-bottom:6px}
-.e-sub{font-size:11px;color:var(--ts);line-height:1.6}
-.e-sub code{font-size:10px;background:var(--s2);padding:2px 6px;border-radius:4px;color:var(--g)}
-.clear-icon{font-size:28px;color:var(--g);margin-bottom:8px}
+/* ── RESOLVED SECTION ── */
+.res-section{border-top:1px solid var(--b);flex-shrink:0}
+.res-group{border-bottom:1px solid var(--b)}
+.res-sum{display:flex;align-items:center;gap:8px;padding:8px 14px;cursor:pointer;font-size:11px;font-weight:600;color:var(--ts);list-style:none;user-select:none}
+.res-sum::-webkit-details-marker{display:none}
+.res-sum:hover{color:var(--t)}
+.res-fixed{color:var(--g)}.res-ign{color:var(--m)}
+.res-n{font-size:10px;font-weight:700;padding:1px 6px;border-radius:100px;background:var(--s2)}
+.res-list{padding:4px 14px 8px}
+.res-item{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--b)}
+.res-item:last-child{border-bottom:none}
+.res-type{font-size:10px;color:var(--ts);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn-reopen{background:none;border:1px solid var(--b);color:var(--m);font-size:9px;padding:1px 7px;border-radius:3px;cursor:pointer;flex-shrink:0;margin-left:8px}
+.btn-reopen:hover{border-color:var(--bh);color:var(--t)}
 
-.ft{padding:8px 16px;border-top:1px solid var(--b);display:flex;justify-content:space-between;color:var(--m);font-size:10px}
-.btn-exp{background:none;border:none;color:var(--m);font-size:10px;cursor:pointer}.btn-exp:hover{color:var(--t)}
+/* ── FOOTER ── */
+.footer{flex-shrink:0;padding:7px 14px;border-top:1px solid var(--b);display:flex;justify-content:space-between;align-items:center;color:var(--m);font-size:10px}
+.btn-exp{background:none;border:none;color:var(--m);font-size:10px;cursor:pointer}
+.btn-exp:hover{color:var(--t)}
 
-.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--s);border:1px solid var(--b);border-radius:var(--rad);padding:6px 14px;font-size:11px;font-weight:500;opacity:0;transition:all .2s;pointer-events:none;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,.4)}
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.toast.ok{border-color:rgba(52,211,153,.25);color:var(--g)}
+/* ── TOAST ── */
+.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--s2);border:1px solid var(--b);border-radius:var(--rad);padding:5px 12px;font-size:11px;font-weight:500;opacity:0;transition:all .18s;pointer-events:none;z-index:999;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:rgba(52,211,153,.25);color:var(--g)}
 </style>
 </head>
 <body>
 
-<div class="hdr">
-  <div class="brand">ybe<span>.</span>check</div>
-
-  ${store?.lastScan ? `
-  <div class="score-row">
-    <span class="score-num">${score ?? '--'}</span>
-    <div class="score-r">
-      <div class="score-lbl">score</div>
-      <div class="verdict ${verdictClass}">${verdictText}</div>
+<!-- VERDICT BAR -->
+<div class="vbar">
+  <div class="v-top">
+    <div class="brand"><b>ybe</b>.check</div>
+    <div class="v-acts">
+      <button class="v-scan" id="scan-btn" title="${scopeLabel}" ${scanning ? 'disabled' : ''}>
+        ${scanning ? '…' : '▶'}
+      </button>
+      <button class="v-gear ${/* active when open */''}'" id="gear-btn" title="Scan settings">⚙</button>
     </div>
   </div>
-  <div class="bar"><div class="bar-f"></div></div>
-  <div class="meta-row">
-    ${counts.open > 0
-      ? `<span class="summary"><b>${counts.open}</b> finding${counts.open !== 1 ? 's' : ''} open</span>`
-      : '<span class="summary">No open issues</span>'}
-    ${lastAgo ? `<span class="last-scan">· ${lastAgo}</span>` : ''}
-    ${scopePill}
+  ${hasScanned || scanning ? `
+  <div class="v-status">
+    <div class="v-dot"></div>
+    <span class="v-label">${verdictLabel || '—'}</span>
+  </div>
+  <div class="v-sub">
+    <span>${verdictSub}</span>
+    ${lastAgo ? `<span class="v-time">${lastAgo}</span>` : ''}
+    ${score !== null ? `<span class="v-score">${score}/100</span>` : ''}
   </div>` : ''}
 </div>
 
-<div class="acts">
-  <button class="btn-scan" id="scan-btn" ${scanning ? 'disabled' : ''}>${scanning ? 'Scanning...' : 'Run scan'}</button>
-  <button class="btn-changed" id="changed-btn" title="Scan only files changed since last commit (git diff)" ${scanning ? 'disabled' : ''}>Changed</button>
-  <div class="auto-w">
-    <span class="auto-l">Auto</span>
-    <label class="tog"><input type="checkbox" id="auto-cb" ${autoScan ? 'checked' : ''}><span class="tsl"></span></label>
+<!-- SETTINGS PANEL -->
+<div class="settings" id="settings-panel">
+  <div class="s-row">
+    <span class="s-label">Scope</span>
+    <div class="s-ctrl s-radio">
+      <label><input type="radio" name="scope" value="full" ${settings.scope === 'full' ? 'checked' : ''}> Full</label>
+      <label><input type="radio" name="scope" value="changed" ${settings.scope === 'changed' ? 'checked' : ''}> Changed</label>
+      <label><input type="radio" name="scope" value="path" ${settings.scope === 'path' ? 'checked' : ''}> Path</label>
+    </div>
+  </div>
+  ${settings.scope === 'path' ? `
+  <div class="s-row">
+    <span class="s-label">Path</span>
+    <div class="s-ctrl">
+      <input class="s-input" id="path-input" placeholder="e.g. src/api" value="${settings.pathFilter}">
+    </div>
+  </div>` : ''}
+  <div class="s-row">
+    <span class="s-label">Auto-scan</span>
+    <div class="s-ctrl">
+      <label class="tog"><input type="checkbox" id="auto-cb" ${settings.autoScan ? 'checked' : ''}><span class="tsl"></span></label>
+      <span style="font-size:10px;color:var(--m);margin-left:6px">on save</span>
+    </div>
   </div>
 </div>
 
-${scanning ? '<div class="scanning-bar"><div class="scanning-p"></div></div>' : ''}
+<!-- SCAN PROGRESS -->
 ${progressHtml}
 
-${emptyState}
-${allClear}
+<!-- MAIN CONTENT -->
+<div class="main">
+  ${emptyHtml}
 
-${store?.lastScan && openGroups.length > 0 ? `
-<div class="section-lbl">Fix these${top.length < openGroups.length ? ' first' : ''}</div>
-<div class="issues">
-  ${topHtml}
-  ${restHtml}
+  ${hasScanned && openRows.length > 0 ? `
+  <div class="findings-lbl">Open — ${counts.open} finding${counts.open !== 1 ? 's' : ''}</div>
+  <div class="findings">${findingsHtml}</div>` : ''}
+
+  ${hasScanned && openRows.length === 0 && !scanning ? findingsHtml : ''}
+
+  ${resolvedHtml}
 </div>
-` : ''}
 
-${resolvedHtml}
-
-<div class="ft">
-  <span>${counts.total} findings total</span>
-  <button class="btn-exp" id="exp-btn">Export</button>
+<!-- FOOTER -->
+<div class="footer">
+  <span>${counts.total} total findings</span>
+  <button class="btn-exp" id="exp-btn">Export JSON</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -394,56 +441,99 @@ ${resolvedHtml}
   }
 
   function getIds(el) {
-    var issue = el.closest('.issue');
-    return issue ? (issue.getAttribute('data-ids') || '').split(',') : [];
+    var f = el.closest('[data-ids]');
+    return f ? (f.getAttribute('data-ids') || '').split(',').filter(Boolean) : [];
   }
 
-  document.getElementById('scan-btn')?.addEventListener('click', function(){ vscode.postMessage({type:'runScan'}); });
-  document.getElementById('changed-btn')?.addEventListener('click', function(){ vscode.postMessage({type:'runChanged'}); });
-  document.getElementById('auto-cb')?.addEventListener('change', function(){ vscode.postMessage({type:'toggleAutoScan', value: this.checked}); });
-  document.getElementById('exp-btn')?.addEventListener('click', function(){ vscode.postMessage({type:'exportReport'}); });
+  // Scan button
+  document.getElementById('scan-btn')?.addEventListener('click', function(){
+    vscode.postMessage({type:'runScan'});
+  });
 
-  document.body.addEventListener('click', function(e) {
+  // Gear toggle
+  var gearBtn = document.getElementById('gear-btn');
+  var settingsPanel = document.getElementById('settings-panel');
+  gearBtn?.addEventListener('click', function(){
+    if (!settingsPanel) return;
+    var open = settingsPanel.classList.toggle('open');
+    gearBtn.classList.toggle('active', open);
+  });
+
+  // Scope radios
+  document.querySelectorAll('input[name="scope"]').forEach(function(radio){
+    radio.addEventListener('change', function(){
+      vscode.postMessage({type:'updateSettings', scope: this.value});
+    });
+  });
+
+  // Path input
+  var pathInput = document.getElementById('path-input');
+  if (pathInput) {
+    var pathTimer;
+    pathInput.addEventListener('input', function(){
+      clearTimeout(pathTimer);
+      pathTimer = setTimeout(function(){
+        vscode.postMessage({type:'updateSettings', pathFilter: pathInput.value});
+      }, 500);
+    });
+  }
+
+  // Auto-scan toggle
+  document.getElementById('auto-cb')?.addEventListener('change', function(){
+    vscode.postMessage({type:'toggleAutoScan', value: this.checked});
+  });
+
+  // Export
+  document.getElementById('exp-btn')?.addEventListener('click', function(){
+    vscode.postMessage({type:'exportReport'});
+  });
+
+  // First scan button
+  document.getElementById('first-scan-btn')?.addEventListener('click', function(){
+    vscode.postMessage({type:'runScan'});
+  });
+
+  // Event delegation
+  document.addEventListener('click', function(e) {
     var el = e.target;
-    while (el && el !== document.body) {
+    while (el && el !== document.documentElement) {
 
-      // Clickable file path — open in editor
-      if (el.classList && el.classList.contains('f-link') && !el.classList.contains('f-more')) {
-        var file = el.getAttribute('data-file');
-        var line = parseInt(el.getAttribute('data-line') || '0', 10);
-        if (file) vscode.postMessage({type:'openFile', file: file, line: line});
+      // Clickable file path
+      if (el.classList && el.classList.contains('f-link') && !el.classList.contains('exp-more')) {
+        vscode.postMessage({type:'openFile', file: el.getAttribute('data-file'), line: parseInt(el.getAttribute('data-line')||'0', 10)});
         return;
       }
 
-      var toggleAttr = el.getAttribute('data-toggle');
-      if (toggleAttr !== null) {
-        var issue = document.getElementById('issue-' + toggleAttr);
-        if (issue) issue.classList.toggle('open');
+      // Toggle finding expand
+      var tog = el.getAttribute('data-toggle');
+      if (tog !== null) {
+        var fr = document.getElementById('fr-' + tog);
+        if (fr) fr.classList.toggle('open');
         return;
       }
 
+      // Action buttons
       var action = el.getAttribute('data-action');
       if (action) {
-        var ids = getIds(el);
+        var ids = el.hasAttribute('data-ids')
+          ? (el.getAttribute('data-ids')||'').split(',').filter(Boolean)
+          : getIds(el);
+
         if (action === 'fix') {
           if (ids.length > 0) vscode.postMessage({type:'fixWithAgent', findingId: ids[0]});
         } else if (action === 'done') {
           ids.forEach(function(id){ vscode.postMessage({type:'setStatus', findingId:id, status:'fixed'}); });
-          toast('Marked ' + ids.length + ' as fixed', 'ok');
+          toast('Marked as fixed', 'ok');
         } else if (action === 'ignore') {
           ids.forEach(function(id){ vscode.postMessage({type:'setStatus', findingId:id, status:'ignored'}); });
-          toast('Ignored ' + ids.length, 'ok');
+          toast('Ignored', 'ok');
         } else if (action === 'reopen') {
           ids.forEach(function(id){ vscode.postMessage({type:'setStatus', findingId:id, status:'open'}); });
           toast('Reopened', 'ok');
-        } else if (action === 'show-more') {
-          var list = document.getElementById('more-list');
-          var btn  = document.getElementById('more-btn');
-          if (list) list.classList.toggle('show');
-          if (btn)  btn.style.display = (list && list.classList.contains('show')) ? 'none' : 'block';
         }
         return;
       }
+
       el = el.parentElement;
     }
   });

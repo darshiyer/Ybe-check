@@ -24,7 +24,7 @@ EXT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(EXT_DIR))
 
 # Import bundled scanner
-from cli import run_scan as _cli_run_scan, _persist_to_store  # noqa: E402
+from cli import run_scan as _cli_run_scan, _persist_to_store, get_changed_files  # noqa: E402
 
 logger = logging.getLogger("ybe-check-mcp")
 
@@ -168,19 +168,14 @@ def _load_or_scan(repo_path: str) -> dict:
 
 def _run_scan(
     repo_path: str,
-    modules: Optional[list[str]] = None,
-    categories: Optional[list[str]] = None,
+    include_paths: Optional[list[str]] = None,
 ) -> dict:
     """Run a scan via the bundled cli.py and return adapted report."""
-    static_only = not categories or "static" in (categories or [])
-    dynamic_only = bool(
-        categories and "dynamic" in categories and "static" not in categories
-    )
-
     cli_report = _cli_run_scan(
         repo_path,
-        static_only=static_only and not dynamic_only,
-        dynamic_only=dynamic_only,
+        static_only=True,
+        dynamic_only=False,
+        include_paths=set(include_paths) if include_paths is not None else None,
     )
 
     # Persist for sidebar
@@ -430,47 +425,60 @@ def _compute_delta(repo_path: str) -> dict:
 
 
 # ================================================================
-# MCP TOOLS — 11 tool implementations (9 original + triage + delta)
+# MCP TOOLS — 7 tools: scan, triage, get_finding, fix, resolve, delta, status
 # ================================================================
 
-def tool_scan_repo(args: dict) -> str:
+def tool_ybe_scan(args: dict) -> str:
+    """Run a scan (full, changed files, or specific path)."""
     repo_path = args.get("path", ".")
-    modules = args.get("modules")
-    categories = args.get("categories")
-    report = _run_scan(repo_path, modules=modules, categories=categories)
-    # Return summary by default to stay within MCP context limits
+    scope = args.get("scope", "full")
+    path_filter = args.get("path_filter", "")
+
+    include_paths: Optional[list[str]] = None
+    if scope == "changed":
+        try:
+            changed = get_changed_files(repo_path)
+            include_paths = list(changed) if changed else []
+        except Exception:
+            include_paths = []
+    elif scope == "path" and path_filter:
+        # Resolve to absolute
+        p = path_filter if os.path.isabs(path_filter) else str(Path(repo_path) / path_filter)
+        include_paths = [p]
+
+    report = _run_scan(repo_path, include_paths=include_paths)
     return json.dumps(_build_security_summary(report, max_findings=20), indent=2)
 
 
-def tool_list_findings(args: dict) -> str:
+def tool_ybe_triage(args: dict) -> str:
+    """Top N distinct root-cause problems ranked by impact, with one fix each.
+    Call this first when starting a session — gives the highest-leverage view."""
     repo_path = args.get("path", ".")
-    severity = args.get("severity")
-    category = args.get("category")
-    limit = args.get("limit", 30)  # default cap to stay within context
+    limit = args.get("limit", 5)
     report = _load_or_scan(repo_path)
     findings = report.get("findings", [])
-    if severity:
-        findings = [f for f in findings if f.get("severity") == severity]
-    if category:
-        findings = [f for f in findings if f.get("category") == category]
-    total = len(findings)
-    findings = findings[:limit]
-    # Compact output: strip evidence to save tokens
-    compact = []
-    for f in findings:
-        compact.append({
-            "id": f.get("id"),
-            "type": f.get("type"),
-            "severity": f.get("severity"),
-            "file": (f.get("location") or {}).get("path", ""),
-            "line": (f.get("location") or {}).get("line"),
-            "summary": f.get("summary", "")[:200],
-        })
-    result = {"total": total, "returned": len(compact), "findings": compact}
-    return json.dumps(result, indent=2)
+    groups = _group_by_root_cause(findings)
+
+    delta = _compute_delta(repo_path)
+    output: dict = {
+        "score": report.get("overall_score", 0),
+        "verdict": report.get("verdict", "UNKNOWN"),
+        "total_findings": len(findings),
+        "root_causes": len(groups),
+        "triage": groups[:limit],
+    }
+    if delta.get("available"):
+        output["delta"] = {
+            "score_change": delta.get("score_delta"),
+            "new": delta.get("new_since_last", 0),
+            "resolved": delta.get("resolved", 0),
+            "open": delta.get("open", 0),
+        }
+    return json.dumps(output, indent=2)
 
 
-def tool_get_remediation(args: dict) -> str:
+def tool_ybe_get_finding(args: dict) -> str:
+    """Get full details and remediation for a specific finding by ID."""
     repo_path = args.get("path", ".")
     finding_id = args.get("finding_id", "")
     report = _load_or_scan(repo_path)
@@ -487,6 +495,7 @@ def tool_get_remediation(args: dict) -> str:
     cwe = match.get("cwe")
     owasp = match.get("owasp")
     loc = match.get("location") or {}
+    evidence = match.get("evidence") or {}
 
     references = []
     if owasp:
@@ -496,112 +505,23 @@ def tool_get_remediation(args: dict) -> str:
 
     return json.dumps({
         "finding_id": finding_id,
+        "type": match.get("type", "issue"),
         "severity": severity,
         "confidence": match.get("confidence", "medium"),
         "file": loc.get("path", ""),
         "line": loc.get("line"),
-        "impact": f"This {severity}-severity {match.get('type', 'issue')} in {loc.get('path', 'unknown')}:{loc.get('line', '?')} may affect production readiness.",
-        "remediation": details_text if details_text else (
-            f"Address: {summary[:200]}. Review {loc.get('path', 'the file')} and apply the fix."
-        ),
+        "summary": summary,
+        "snippet": evidence.get("snippet") or evidence.get("match") or "",
+        "remediation": details_text or f"Address: {summary[:200]}. Review {loc.get('path', 'the file')} and apply the fix.",
         "cwe": cwe,
+        "owasp": owasp,
         "references": references,
+        "test_fixture": match.get("test_fixture", False),
     }, indent=2)
 
 
-def tool_get_security_context(args: dict) -> str:
-    repo_path = args.get("path", ".")
-    file_filter = args.get("file")
-    report = _load_or_scan(repo_path)
-    ctx = _build_security_summary(report)
-
-    if file_filter:
-        file_findings = [
-            f for f in report.get("findings", [])
-            if file_filter in ((f.get("location") or {}).get("path") or "")
-        ]
-        file_findings.sort(
-            key=lambda f: SEV_WEIGHT.get(f.get("severity", "medium"), 3),
-            reverse=True,
-        )
-        ctx["file_filter"] = file_filter
-        ctx["file_findings"] = [
-            {
-                "id": f.get("id"),
-                "type": f.get("type"),
-                "severity": f.get("severity"),
-                "line": (f.get("location") or {}).get("line"),
-                "summary": f.get("summary", "")[:200],
-            }
-            for f in file_findings[:20]
-        ]
-    return json.dumps(ctx, indent=2)
-
-
-def tool_enhance_prompt(args: dict) -> str:
-    repo_path = args.get("path", ".")
-    user_prompt = args.get("user_prompt", "")
-    file_filter = args.get("file")
-    report = _load_or_scan(repo_path)
-    ctx = _build_security_summary(report)
-
-    file_section = ""
-    if file_filter:
-        file_findings = [
-            f for f in report.get("findings", [])
-            if file_filter in ((f.get("location") or {}).get("path") or "")
-        ]
-        if file_findings:
-            file_findings.sort(
-                key=lambda f: SEV_WEIGHT.get(f.get("severity", "medium"), 3),
-                reverse=True,
-            )
-            items = "\n".join(
-                f"  - [{f.get('severity','medium').upper()}] Line "
-                f"{(f.get('location') or {}).get('line', '?')}: "
-                f"{f.get('type', 'issue')} — {f.get('summary', '')[:120]}"
-                for f in file_findings[:10]
-            )
-            file_section = f"\n\n### Known Issues in `{file_filter}`:\n{items}"
-
-    sev = ctx.get("severity_breakdown", {})
-    sev_line = ", ".join(
-        f"{k}: {v}"
-        for k, v in sorted(
-            sev.items(), key=lambda x: SEV_WEIGHT.get(x[0], 0), reverse=True,
-        )
-    )
-
-    fixes = ctx.get("top_fixes", [])
-    fixes_section = ""
-    if fixes:
-        fixes_items = "\n".join(
-            f"  {i + 1}. {fix}" for i, fix in enumerate(fixes[:5])
-        )
-        fixes_section = f"\n\n### Priority Fixes:\n{fixes_items}"
-
-    enhanced = (
-        f"## Security Context (Ybe Check Scan)\n"
-        f"**Score: {ctx.get('overall_score', 0)}/100 "
-        f"— {ctx.get('verdict', 'UNKNOWN')}**\n"
-        f"Findings: {ctx.get('total_findings', 0)} total ({sev_line})\n"
-        f"Weakest modules: "
-        f"{', '.join(ctx.get('weakest_modules', [])) or 'none'}"
-        f"{file_section}{fixes_section}\n\n---\n\n"
-        f"## User Request:\n{user_prompt}\n\n---\n\n"
-        "**IMPORTANT**: When responding, you MUST:\n"
-        "1. Consider the security findings above in your answer.\n"
-        "2. If the user's request touches code with known vulnerabilities, "
-        "warn them and suggest the secure approach.\n"
-        "3. Never introduce patterns that would lower the security score.\n"
-        "4. Reference specific finding IDs (e.g. secrets:0) when relevant.\n"
-        "5. If suggesting code changes, ensure they address or at least "
-        "don't worsen the listed issues."
-    )
-    return json.dumps({"enhanced_prompt": enhanced, "context": ctx}, indent=2)
-
-
-def tool_get_fix_prompt(args: dict) -> str:
+def tool_ybe_fix(args: dict) -> str:
+    """Generate a ready-to-use fix prompt for a specific finding."""
     repo_path = args.get("path", ".")
     finding_id = args.get("finding_id", "")
     report = _load_or_scan(repo_path)
@@ -637,70 +557,19 @@ def tool_get_fix_prompt(args: dict) -> str:
         "3. Ensure the fix doesn't break existing functionality.\n"
         "4. If there are related issues in the same file, mention them."
     )
-    return json.dumps(
-        {"finding_id": finding_id, "prompt": prompt.strip()}, indent=2,
-    )
+    return json.dumps({"finding_id": finding_id, "prompt": prompt.strip()}, indent=2)
 
 
-def tool_get_review_prompt(args: dict) -> str:
-    repo_path = args.get("path", ".")
-    file = args.get("file", "")
-    report = _load_or_scan(repo_path)
-    file_findings = [
-        f for f in report.get("findings", [])
-        if file in ((f.get("location") or {}).get("path") or "")
-    ]
-    file_findings.sort(
-        key=lambda f: SEV_WEIGHT.get(f.get("severity", "medium"), 3),
-        reverse=True,
-    )
-
-    if not file_findings:
-        prompt = (
-            f"Review `{file}` for security issues.\n\n"
-            "No known findings from the last Ybe Check scan, but please check for:\n"
-            "- Hardcoded secrets or API keys\n"
-            "- SQL injection or command injection\n"
-            "- Missing input validation\n"
-            "- Insecure authentication patterns\n"
-            "- PII/sensitive data logging\n"
-            "- Missing error handling"
-        )
-    else:
-        issues_text = "\n".join(
-            f"  {i + 1}. [{(f.get('severity', 'medium')).upper()}] "
-            f"Line {(f.get('location') or {}).get('line', '?')}: "
-            f"{f.get('type', 'issue')} — {f.get('summary', '')[:150]}"
-            for i, f in enumerate(file_findings[:15])
-        )
-        prompt = (
-            f"Review `{file}` for security issues.\n\n"
-            f"Ybe Check found {len(file_findings)} issue(s) in this file:\n"
-            f"{issues_text}\n\n"
-            "Please:\n"
-            "1. Read through the file and validate each finding above.\n"
-            "2. Provide the exact code fix for each confirmed issue.\n"
-            "3. Check for any additional security problems not caught by the scanner.\n"
-            "4. Rate the overall security quality of this file (1-10).\n"
-            "5. Suggest any architectural improvements for better security."
-        )
-
-    ctx = _build_security_summary(report)
-    return json.dumps({
-        "file": file,
-        "known_issues": len(file_findings),
-        "prompt": prompt.strip(),
-        "workspace_score": ctx["overall_score"],
-    }, indent=2)
-
-
-def tool_resolve_finding(args: dict) -> str:
+def tool_ybe_resolve(args: dict) -> str:
+    """Mark a finding as fixed, ignored, or reopen it."""
     repo_path = args.get("path", ".")
     finding_id = args.get("finding_id", "")
-    status = args.get("status", "fixed")
+    # Accept 'resolution' (spec) or legacy 'status'
+    resolution = args.get("resolution") or args.get("status", "fixed")
+    note = args.get("note", "")
 
-    if status not in ("fixed", "ignored", "open"):
-        return json.dumps({"error": f"Invalid status '{status}'."})
+    if resolution not in ("fixed", "ignored", "open"):
+        return json.dumps({"error": f"Invalid resolution '{resolution}'. Use fixed, ignored, or open."})
 
     store_path = Path(repo_path) / ".ybe-check" / "store.json"
     if not store_path.exists():
@@ -717,7 +586,9 @@ def tool_resolve_finding(args: dict) -> str:
         return json.dumps({"error": f"Finding '{finding_id}' not found in store."})
 
     old_status = match.get("status", "open")
-    match["status"] = status
+    match["status"] = resolution
+    if note:
+        match["note"] = note
 
     try:
         store_path.write_text(json.dumps(store, indent=2), "utf-8")
@@ -727,71 +598,59 @@ def tool_resolve_finding(args: dict) -> str:
     return json.dumps({
         "finding_id": finding_id,
         "old_status": old_status,
-        "new_status": status,
+        "new_status": resolution,
+        "note": note or None,
         "type": match.get("type", ""),
-        "file": match.get("file", ""),
+        "file": (match.get("location") or {}).get("path") or match.get("file", ""),
     }, indent=2)
 
 
-def tool_check_fix_queue(args: dict) -> str:
-    repo_path = args.get("path", ".")
-    queue_path = Path(repo_path) / ".ybe-check" / "fix-queue.json"
-    if not queue_path.exists():
-        return json.dumps({"pending": False})
-
-    try:
-        request = json.loads(queue_path.read_text("utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return json.dumps({"pending": False})
-
-    # Clear the queue after reading
-    try:
-        queue_path.unlink()
-    except OSError:
-        pass
-
-    return json.dumps({"pending": True, "fix_request": request}, indent=2)
-
-
-def tool_triage(args: dict) -> str:
-    """Top N distinct root-cause problems ranked by impact, with one fix each."""
-    repo_path = args.get("path", ".")
-    limit = args.get("limit", 5)
-    report = _load_or_scan(repo_path)
-    findings = report.get("findings", [])
-    groups = _group_by_root_cause(findings)
-
-    # Include delta if available
-    delta = _compute_delta(repo_path)
-
-    output: dict = {
-        "score": report.get("overall_score", 0),
-        "verdict": report.get("verdict", "UNKNOWN"),
-        "total_findings": len(findings),
-        "root_causes": len(groups),
-        "triage": groups[:limit],
-    }
-
-    if delta.get("available"):
-        output["delta"] = {
-            "score_change": delta.get("score_delta"),
-            "new": delta.get("new_since_last", 0),
-            "resolved": delta.get("resolved", 0),
-            "open": delta.get("open", 0),
-        }
-
-    return json.dumps(output, indent=2)
-
-
-def tool_delta(args: dict) -> str:
-    """Show what changed since the last scan: resolved, new, remaining."""
+def tool_ybe_delta(args: dict) -> str:
+    """What changed since the last scan: new issues, resolved, score change."""
     repo_path = args.get("path", ".")
     delta = _compute_delta(repo_path)
     if not delta.get("available"):
-        return json.dumps({
-            "error": "No scan history. Run at least 2 scans to see deltas.",
-        })
+        return json.dumps({"error": "No scan history. Run at least 2 scans to see deltas."})
     return json.dumps(delta, indent=2)
+
+
+def tool_ybe_status(args: dict) -> str:
+    """Current security status: score, open/fixed/ignored counts, last scan time."""
+    repo_path = args.get("path", ".")
+    store_path = Path(repo_path) / ".ybe-check" / "store.json"
+    if not store_path.exists():
+        return json.dumps({"scanned": False, "message": "No scan data. Run ybe_scan first."})
+
+    try:
+        store = json.loads(store_path.read_text("utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return json.dumps({"scanned": False, "message": "Could not read store."})
+
+    findings = store.get("findings", [])
+    open_f   = [f for f in findings if f.get("status") == "open"]
+    fixed_f  = [f for f in findings if f.get("status") == "fixed"]
+    ign_f    = [f for f in findings if f.get("status") == "ignored"]
+
+    by_sev: dict[str, int] = {}
+    for f in open_f:
+        s = f.get("severity", "medium")
+        by_sev[s] = by_sev.get(s, 0) + 1
+
+    history = store.get("history", [])
+    prev_score = history[-2]["score"] if len(history) >= 2 else None
+
+    return json.dumps({
+        "scanned": True,
+        "score": store.get("currentScore"),
+        "previous_score": prev_score,
+        "verdict": store.get("verdict", "UNKNOWN"),
+        "last_scan": store.get("lastScan"),
+        "open": len(open_f),
+        "fixed": len(fixed_f),
+        "ignored": len(ign_f),
+        "total": len(findings),
+        "open_by_severity": by_sev,
+    }, indent=2)
 
 
 # ================================================================
@@ -799,197 +658,129 @@ def tool_delta(args: dict) -> str:
 # ================================================================
 
 TOOLS: dict[str, dict[str, Any]] = {
-    "ybe.scan_repo": {
-        "handler": tool_scan_repo,
+    "ybe_scan": {
+        "handler": tool_ybe_scan,
         "schema": {
-            "name": "ybe.scan_repo",
+            "name": "ybe_scan",
             "description": (
-                "Scan a repository for security and production-readiness issues. "
-                "Runs all enabled modules (secrets, prompt injection, PII, "
-                "dependencies, auth guards, IaC, etc.) and returns a unified report."
+                "Scan a repository for security issues. "
+                "scope='full' scans everything (default); "
+                "scope='changed' scans only git-modified files; "
+                "scope='path' scans a specific file or folder (supply path_filter). "
+                "Returns a summary with score, severity breakdown, and top findings."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "path": {"type": "string", "description": "Absolute path to the repository root."},
+                    "scope": {
                         "type": "string",
-                        "description": "Absolute or relative path to the repository root.",
+                        "enum": ["full", "changed", "path"],
+                        "description": "Scan scope. Default: full.",
+                        "default": "full",
                     },
-                    "modules": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional subset of module names.",
-                    },
-                    "categories": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": 'Optional subset of ["static", "dynamic", "infra"].',
+                    "path_filter": {
+                        "type": "string",
+                        "description": "File or folder to scan when scope='path' (relative to repo root).",
                     },
                 },
                 "required": ["path"],
             },
         },
     },
-    "ybe.list_findings": {
-        "handler": tool_list_findings,
+    "ybe_triage": {
+        "handler": tool_ybe_triage,
         "schema": {
-            "name": "ybe.list_findings",
-            "description": "List findings from a previous or fresh scan, optionally filtered. Returns compact summaries (max 30 by default).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository."},
-                    "severity": {"type": "string", "description": "Filter: info | low | medium | high | critical."},
-                    "category": {"type": "string", "description": "Filter: static | dynamic | infra."},
-                    "limit": {"type": "integer", "description": "Max findings to return (default 30).", "default": 30},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    "ybe.get_remediation": {
-        "handler": tool_get_remediation,
-        "schema": {
-            "name": "ybe.get_remediation",
-            "description": "Get remediation guidance for a specific finding.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository."},
-                    "finding_id": {"type": "string", "description": 'Finding ID (e.g. "secrets:0").'},
-                },
-                "required": ["path", "finding_id"],
-            },
-        },
-    },
-    "ybe.get_security_context": {
-        "handler": tool_get_security_context,
-        "schema": {
-            "name": "ybe.get_security_context",
+            "name": "ybe_triage",
             "description": (
-                "Return a structured security context for the workspace. "
-                "Call this FIRST to understand the security posture before answering code questions."
+                "Top N distinct root-cause problems ranked by impact, each with a concrete one-step fix. "
+                "Call this first when starting a session — gives the highest-leverage view of the repo."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
-                    "file": {"type": "string", "description": "Optional file path to narrow findings."},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    "ybe.enhance_prompt": {
-        "handler": tool_enhance_prompt,
-        "schema": {
-            "name": "ybe.enhance_prompt",
-            "description": "Wrap a user prompt with security-aware context from the latest scan.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
-                    "user_prompt": {"type": "string", "description": "The original user prompt."},
-                    "file": {"type": "string", "description": "Optional file path for focused context."},
-                },
-                "required": ["path", "user_prompt"],
-            },
-        },
-    },
-    "ybe.get_fix_prompt": {
-        "handler": tool_get_fix_prompt,
-        "schema": {
-            "name": "ybe.get_fix_prompt",
-            "description": "Generate a ready-to-use prompt for fixing a specific finding.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
-                    "finding_id": {"type": "string", "description": 'Finding ID (e.g. "secrets:0").'},
-                },
-                "required": ["path", "finding_id"],
-            },
-        },
-    },
-    "ybe.get_review_prompt": {
-        "handler": tool_get_review_prompt,
-        "schema": {
-            "name": "ybe.get_review_prompt",
-            "description": "Generate a security-focused code review prompt for a file.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
-                    "file": {"type": "string", "description": "Relative path to the file to review."},
-                },
-                "required": ["path", "file"],
-            },
-        },
-    },
-    "ybe.resolve_finding": {
-        "handler": tool_resolve_finding,
-        "schema": {
-            "name": "ybe.resolve_finding",
-            "description": "Mark a finding as fixed or ignored in the persistent security store.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
-                    "finding_id": {"type": "string", "description": "Finding ID (12-char hash)."},
-                    "status": {"type": "string", "description": '"fixed", "ignored", or "open".', "default": "fixed"},
-                },
-                "required": ["path", "finding_id"],
-            },
-        },
-    },
-    "ybe.check_fix_queue": {
-        "handler": tool_check_fix_queue,
-        "schema": {
-            "name": "ybe.check_fix_queue",
-            "description": (
-                "Check if the user requested a fix from the sidebar. "
-                "Returns finding details and fix prompt if pending."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    "ybe.triage": {
-        "handler": tool_triage,
-        "schema": {
-            "name": "ybe.triage",
-            "description": (
-                "Triage: top N distinct root-cause problems ranked by impact. "
-                "Each entry has a label, severity, affected files, and a concrete fix. "
-                "This is the first tool to call when starting a session."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
+                    "path": {"type": "string", "description": "Absolute path to the repository root."},
                     "limit": {"type": "integer", "description": "Max root causes to return (default 5).", "default": 5},
                 },
                 "required": ["path"],
             },
         },
     },
-    "ybe.delta": {
-        "handler": tool_delta,
+    "ybe_get_finding": {
+        "handler": tool_ybe_get_finding,
         "schema": {
-            "name": "ybe.delta",
-            "description": (
-                "Delta scan: what changed since the last scan. "
-                "Shows resolved, new, and remaining counts plus score change."
-            ),
+            "name": "ybe_get_finding",
+            "description": "Get full details, evidence, and remediation guidance for a specific finding by ID.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path to the repository root."},
+                    "path": {"type": "string", "description": "Absolute path to the repository root."},
+                    "finding_id": {"type": "string", "description": 'Finding ID (e.g. "secrets:0").'},
+                },
+                "required": ["path", "finding_id"],
+            },
+        },
+    },
+    "ybe_fix": {
+        "handler": tool_ybe_fix,
+        "schema": {
+            "name": "ybe_fix",
+            "description": "Generate a ready-to-use fix prompt for a specific finding. Returns a structured prompt you can act on directly.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path to the repository root."},
+                    "finding_id": {"type": "string", "description": 'Finding ID (e.g. "secrets:0").'},
+                },
+                "required": ["path", "finding_id"],
+            },
+        },
+    },
+    "ybe_resolve": {
+        "handler": tool_ybe_resolve,
+        "schema": {
+            "name": "ybe_resolve",
+            "description": "Mark a finding as fixed, ignored, or reopen it in the persistent security store.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path to the repository root."},
+                    "finding_id": {"type": "string", "description": "Finding ID."},
+                    "resolution": {
+                        "type": "string",
+                        "enum": ["fixed", "ignored", "open"],
+                        "description": "New status for the finding.",
+                        "default": "fixed",
+                    },
+                    "note": {"type": "string", "description": "Optional note explaining the resolution."},
+                },
+                "required": ["path", "finding_id"],
+            },
+        },
+    },
+    "ybe_delta": {
+        "handler": tool_ybe_delta,
+        "schema": {
+            "name": "ybe_delta",
+            "description": "What changed since the last scan: new issues introduced, resolved, remaining open, and score change.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path to the repository root."},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    "ybe_status": {
+        "handler": tool_ybe_status,
+        "schema": {
+            "name": "ybe_status",
+            "description": "Current security status: score, open/fixed/ignored counts, severity breakdown, and last scan time. Fast — reads from store without rescanning.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path to the repository root."},
                 },
                 "required": ["path"],
             },
@@ -1002,7 +793,7 @@ TOOLS: dict[str, dict[str, Any]] = {
 PROMPTS: dict[str, dict] = {
     "security-audit": {
         "name": "security-audit",
-        "description": "Comprehensive security audit prompt for the current workspace.",
+        "description": "Comprehensive security audit of the current workspace.",
         "arguments": [],
     },
     "fix-critical": {
@@ -1010,46 +801,31 @@ PROMPTS: dict[str, dict] = {
         "description": "Fix all critical and high severity findings.",
         "arguments": [],
     },
-    "review-file": {
-        "name": "review-file",
-        "description": "Security-focused review of the currently open file.",
-        "arguments": [],
-    },
 }
 
 PROMPT_CONTENT: dict[str, str] = {
     "security-audit": (
         "You are a senior security engineer performing a production-readiness audit.\n\n"
-        "Use the ybe.get_security_context tool to get the current scan results for this workspace,\n"
-        "then provide a comprehensive security review covering:\n\n"
-        "1. **Critical Issues** — List all critical/high findings that must be fixed before deployment.\n"
-        "2. **Quick Wins** — Issues that are easy to fix and improve the score significantly.\n"
-        "3. **Architecture Concerns** — Structural security problems (auth flow, data handling, etc.).\n"
-        "4. **Compliance Gaps** — Missing security controls for production (HTTPS, CSP, rate limiting, etc.).\n"
-        "5. **Prioritized Action Plan** — Ordered list of what to fix first for maximum score improvement.\n\n"
-        "Reference specific finding IDs from the scan. Be specific with file names and line numbers."
+        "1. Call ybe_triage to get the top root-cause problems ranked by impact.\n"
+        "2. Call ybe_status for the current score and counts.\n"
+        "Then provide a comprehensive security review covering:\n\n"
+        "- **Critical Issues** — findings that must be fixed before deployment.\n"
+        "- **Quick Wins** — easy fixes that improve the score significantly.\n"
+        "- **Architecture Concerns** — structural problems (auth flow, data handling, etc.).\n"
+        "- **Prioritized Action Plan** — ordered list of what to fix first.\n\n"
+        "Reference specific finding IDs. Be specific with file names and line numbers."
     ),
     "fix-critical": (
         "You are a security remediation specialist.\n\n"
-        "Use the ybe.get_security_context tool to get all findings, then focus on CRITICAL and HIGH severity issues.\n\n"
-        "For each critical/high finding:\n"
-        "1. Show the exact file and line.\n"
-        "2. Explain the vulnerability in one sentence.\n"
-        "3. Provide the complete fixed code (not just a diff — show the full corrected function/block).\n"
-        "4. Verify the fix doesn't introduce new issues.\n\n"
-        "Start with the most severe issues first. Use ybe.get_fix_prompt for detailed context on each finding.\n"
-        "After all fixes, estimate what the new security score would be."
-    ),
-    "review-file": (
-        "You are a code reviewer focused on security.\n\n"
-        "Use the ybe.get_review_prompt tool with the path to the currently open file to get\n"
-        "known issues, then perform a thorough security review:\n\n"
-        "1. Validate each finding from the scan — is it a true positive?\n"
-        "2. Check for issues the scanner may have missed.\n"
-        "3. Rate the security quality (1-10).\n"
-        "4. Provide specific code fixes for each confirmed issue.\n"
-        "5. Suggest hardening improvements.\n\n"
-        "Be precise — reference exact line numbers and show corrected code blocks."
+        "1. Call ybe_triage to identify the highest-impact root causes.\n"
+        "2. For each critical/high finding, call ybe_fix to get the fix prompt.\n"
+        "3. Apply the fix, then call ybe_resolve with resolution='fixed'.\n\n"
+        "For each fix:\n"
+        "- Show the exact file and line.\n"
+        "- Explain the vulnerability in one sentence.\n"
+        "- Provide the complete corrected code block.\n"
+        "- Verify the fix doesn't introduce new issues.\n\n"
+        "Start with the most severe issues. After all fixes, call ybe_status to show the new score."
     ),
 }
 
