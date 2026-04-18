@@ -82,6 +82,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'fixWithAgent':    this._handleFixWithAgent(msg.findingId); break;
                 case 'exportReport':    this._exportReport(); break;
                 case 'openFile':        this._openFileAtLine(msg.file, msg.line); break;
+                case 'clearFindings':   this._clearFindings(); break;
             }
         }, undefined, this._context.subscriptions);
     }
@@ -347,6 +348,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             // Reopen has no animation on the webview side, so toast here
             this._view?.webview.postMessage({ type: 'toast', text: 'Reopened', style: 'ok' });
         }
+    }
+
+    // ── Clear ────────────────────────────────────────────────────────
+
+    private _clearFindings(): void {
+        const root = getWorkspaceRoot();
+        if (!root) { return; }
+        const storePath = require('path').join(root, '.ybe-check', 'store.json');
+        try { require('fs').unlinkSync(storePath); } catch { /* already gone */ }
+        this._store?.reload();
+        this._render();
     }
 
     // ── Export ───────────────────────────────────────────────────────

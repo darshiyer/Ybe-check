@@ -530,6 +530,12 @@ ${settings.autoScan && hasScanned && !scanning ? '.v-dot{animation:vp 2.5s ease-
       <button class="btn" id="exp-btn-s" style="height:22px;font-size:10px">Export JSON</button>
     </div>
   </div>
+  <div class="s-row">
+    <span class="s-label">Reset</span>
+    <div class="s-ctrl">
+      <button class="btn" id="clear-btn" style="height:22px;font-size:10px;color:var(--sev-c);border-color:rgba(255,77,77,.25)">Clear findings</button>
+    </div>
+  </div>
 </div>
 
 <!-- SCAN PROGRESS -->
@@ -656,6 +662,10 @@ ${progressHtml}
   function doExport() { vscode.postMessage({type:'exportReport'}); }
   document.getElementById('exp-btn')?.addEventListener('click', doExport);
   document.getElementById('exp-btn-s')?.addEventListener('click', doExport);
+
+  document.getElementById('clear-btn')?.addEventListener('click', function(){
+    vscode.postMessage({type:'clearFindings'});
+  });
 
   // ── Event delegation ───────────────────────────────────────────
   document.addEventListener('click', function(e) {
