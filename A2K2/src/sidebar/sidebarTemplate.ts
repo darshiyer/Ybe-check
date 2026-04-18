@@ -151,6 +151,7 @@ export function getSidebarHtml(input: SidebarInput, nonce: string): string {
     <span class="f-title">${row.type}</span>
     ${newBadge}
     ${fileCount}
+    <button class="r-ai" data-action="fix" title="Fix with AI">Fix ✦</button>
     <svg class="f-chev" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5l3.5 3.5L3 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
   </div>
   <div class="f-exp">
@@ -244,13 +245,13 @@ body{background:var(--bg);color:var(--t);font-family:'Inter',-apple-system,sans-
 .v-gear{width:26px;height:26px;border-radius:var(--rad);border:1px solid var(--b);background:none;color:var(--m);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
 .v-gear:hover{border-color:var(--bh);color:var(--t)}.v-gear.active{border-color:var(--g);color:var(--g)}
 
-.v-status{display:flex;align-items:center;gap:7px}
-.v-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${verdictDot}}
+.v-status{display:flex;align-items:center;gap:8px}
+.v-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:${verdictDot}}
 ${settings.autoScan && hasScanned && !scanning ? '.v-dot{animation:vp 2.5s ease-in-out infinite}@keyframes vp{0%,100%{opacity:1}50%{opacity:.35}}' : ''}
-.v-label{font-size:13px;font-weight:700;color:var(--t)}
-.v-sub{font-size:11px;color:var(--ts);margin-top:3px;display:flex;align-items:center;gap:8px}
+.v-label{font-size:17px;font-weight:800;color:var(--t);letter-spacing:-.3px}
+.v-score{font-size:10px;font-weight:600;padding:2px 8px;border-radius:100px;background:var(--s2);color:${sc};margin-top:1px}
+.v-sub{font-size:11px;color:var(--ts);margin-top:4px;display:flex;align-items:center;gap:8px}
 .v-time{color:var(--m);font-size:10px}
-.v-score{font-size:10px;font-weight:600;padding:1px 7px;border-radius:100px;background:var(--s2);color:${sc}}
 
 /* ── SETTINGS PANEL ── */
 .settings{flex-shrink:0;border-bottom:1px solid var(--b);background:var(--s);padding:0;overflow:hidden;max-height:0;transition:max-height .2s ease,padding .2s}
@@ -303,6 +304,8 @@ ${settings.autoScan && hasScanned && !scanning ? '.v-dot{animation:vp 2.5s ease-
 .r-fc{font-size:10px;color:var(--m);flex-shrink:0}
 .f-chev{color:var(--m);flex-shrink:0;transition:transform .15s}
 .finding.open .f-chev{transform:rotate(90deg)}
+.r-ai{height:20px;padding:0 7px;border-radius:3px;border:1px solid rgba(52,211,153,.2);background:var(--gd);color:var(--g);font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0;transition:all .1s;white-space:nowrap}
+.r-ai:hover{background:var(--ga);border-color:rgba(52,211,153,.4)}
 .f-exp{display:none;padding:0 14px 12px;border-top:1px solid var(--b);background:var(--s)}
 .finding.open .f-exp{display:block}
 .exp-files{margin-top:8px;margin-bottom:6px}
@@ -370,11 +373,11 @@ ${settings.autoScan && hasScanned && !scanning ? '.v-dot{animation:vp 2.5s ease-
   <div class="v-status">
     <div class="v-dot"></div>
     <span class="v-label">${verdictLabel || '—'}</span>
+    ${score !== null ? `<span class="v-score">${score}/100</span>` : ''}
   </div>
   <div class="v-sub">
     <span>${verdictSub}</span>
     ${lastAgo ? `<span class="v-time">${lastAgo}</span>` : ''}
-    ${score !== null ? `<span class="v-score">${score}/100</span>` : ''}
   </div>` : ''}
 </div>
 
@@ -412,7 +415,7 @@ ${progressHtml}
   ${emptyHtml}
 
   ${hasScanned && openRows.length > 0 ? `
-  <div class="findings-lbl">Open — ${counts.open} finding${counts.open !== 1 ? 's' : ''}</div>
+  <div class="findings-lbl">Open — ${openRows.length} issue${openRows.length !== 1 ? 's' : ''}</div>
   <div class="findings">${findingsHtml}</div>` : ''}
 
   ${hasScanned && openRows.length === 0 && !scanning ? findingsHtml : ''}
@@ -422,7 +425,7 @@ ${progressHtml}
 
 <!-- FOOTER -->
 <div class="footer">
-  <span>${counts.total} total findings</span>
+  <span style="color:var(--m)">ybe.check</span>
   <button class="btn-exp" id="exp-btn">Export JSON</button>
 </div>
 

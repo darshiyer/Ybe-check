@@ -16,6 +16,7 @@ import sys
 import os
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -390,6 +391,16 @@ def _group_by_root_cause(findings: list[dict]) -> list[dict]:
 # DELTA SCAN — compare current findings with store
 # ================================================================
 
+def _score_to_verdict(score: int | None) -> str:
+    if score is None:
+        return "Unknown"
+    if score >= 80:
+        return "Ready to ship"
+    if score >= 40:
+        return "Needs work"
+    return "Not ready"
+
+
 def _compute_delta(repo_path: str) -> dict:
     """Compare current scan findings with the persistent store to get deltas."""
     store_path = Path(repo_path) / ".ybe-check" / "store.json"
@@ -442,30 +453,120 @@ def tool_ybe_scan(args: dict) -> str:
         except Exception:
             include_paths = []
     elif scope == "path" and path_filter:
-        # Resolve to absolute
         p = path_filter if os.path.isabs(path_filter) else str(Path(repo_path) / path_filter)
         include_paths = [p]
 
+    t0 = time.monotonic()
     report = _run_scan(repo_path, include_paths=include_paths)
-    return json.dumps(_build_security_summary(report, max_findings=20), indent=2)
+    duration_ms = int((time.monotonic() - t0) * 1000)
+
+    findings = report.get("findings", [])
+    files_seen: set[str] = set()
+    for f in findings:
+        fp = (f.get("location") or {}).get("path")
+        if fp:
+            files_seen.add(fp)
+
+    score = report.get("overall_score")
+    verdict = _score_to_verdict(score)
+
+    by_sev: dict[str, int] = {}
+    for f in findings:
+        s = f.get("severity", "medium")
+        by_sev[s] = by_sev.get(s, 0) + 1
+
+    sorted_f = sorted(findings, key=lambda f: SEV_WEIGHT.get(f.get("severity", "medium"), 3), reverse=True)
+    top_findings = []
+    for f in sorted_f[:5]:
+        loc = f.get("location") or {}
+        top_findings.append({
+            "finding_id": f.get("id"),
+            "severity": f.get("severity"),
+            "title": f.get("type", "Security Issue"),
+            "file": loc.get("path", ""),
+            "line": loc.get("line"),
+            "fix_summary": (f.get("details") or f.get("summary", ""))[:150],
+        })
+
+    delta = _compute_delta(repo_path)
+    result: dict = {
+        "files_scanned": len(files_seen) or 1,
+        "duration_ms": duration_ms,
+        "score": score,
+        "verdict": verdict,
+        "findings": {
+            "critical": by_sev.get("critical", 0),
+            "high": by_sev.get("high", 0),
+            "medium": by_sev.get("medium", 0),
+            "low": by_sev.get("low", 0),
+        },
+        "top_findings": top_findings,
+    }
+    if delta.get("available"):
+        result["previous_score"] = delta.get("previous_score")
+        new_c = delta.get("new_since_last", 0)
+        res_c = delta.get("resolved", 0)
+        parts = []
+        if new_c:
+            parts.append(f"{new_c} new")
+        if res_c:
+            parts.append(f"{res_c} resolved")
+        if parts:
+            result["delta_summary"] = ", ".join(parts) + " since last scan"
+    return json.dumps(result, indent=2)
 
 
 def tool_ybe_triage(args: dict) -> str:
-    """Top N distinct root-cause problems ranked by impact, with one fix each.
-    Call this first when starting a session — gives the highest-leverage view."""
+    """Top N distinct root-cause problems, each with code context and a concrete fix.
+    Call this first — responses are self-contained, no follow-up tool calls needed."""
     repo_path = args.get("path", ".")
     limit = args.get("limit", 5)
     report = _load_or_scan(repo_path)
     findings = report.get("findings", [])
     groups = _group_by_root_cause(findings)
 
+    # Build findings index by root cause for fast lookup
+    cause_findings: dict[str, list[dict]] = {}
+    for f in findings:
+        ftype = (f.get("type") or "").lower().strip()
+        cause = _ROOT_CAUSE_MAP.get(ftype) or _infer_root_cause(ftype)
+        cause_findings.setdefault(cause, []).append(f)
+
+    triage: list[dict] = []
+    for group in groups[:limit]:
+        cause = group["root_cause"]
+        members = cause_findings.get(cause, [])
+        # Up to 4 file+snippet examples
+        examples = []
+        for f in members[:4]:
+            loc = f.get("location") or {}
+            ev = f.get("evidence") or {}
+            examples.append({
+                "file": loc.get("path", ""),
+                "line": loc.get("line"),
+                "snippet": (ev.get("snippet") or ev.get("match") or "")[:200],
+            })
+        triage.append({
+            "finding_id": group.get("example_id"),
+            "severity": group["worst_severity"],
+            "title": group["label"],
+            "description": (
+                f"{group['total']} instance{'s' if group['total'] != 1 else ''} "
+                f"across {len(group['files'])} file{'s' if len(group['files']) != 1 else ''}"
+                + (f" ({group['production']} in production)" if group.get("test_fixture", 0) > 0 else "")
+            ),
+            "files": examples,
+            "fix_suggestion": group["fix"],
+            "cwe": group.get("cwe"),
+        })
+
+    score = report.get("overall_score")
     delta = _compute_delta(repo_path)
     output: dict = {
-        "score": report.get("overall_score", 0),
-        "verdict": report.get("verdict", "UNKNOWN"),
+        "score": score,
+        "verdict": _score_to_verdict(score),
         "total_findings": len(findings),
-        "root_causes": len(groups),
-        "triage": groups[:limit],
+        "triage": triage,
     }
     if delta.get("available"):
         output["delta"] = {
@@ -595,13 +696,35 @@ def tool_ybe_resolve(args: dict) -> str:
     except OSError as e:
         return json.dumps({"error": f"Failed to write store: {e}"})
 
+    # Compute remaining open counts + new verdict
+    open_after = [f for f in findings if f.get("status") == "open"]
+    remaining: dict[str, int] = {}
+    for f in open_after:
+        s = f.get("severity", "medium")
+        remaining[s] = remaining.get(s, 0) + 1
+
+    total_open = len(open_after)
+    if total_open == 0:
+        new_verdict = "Ready to ship"
+    elif remaining.get("critical", 0) > 0:
+        new_verdict = "Not ready"
+    else:
+        new_verdict = "Needs work"
+
     return json.dumps({
+        "success": True,
         "finding_id": finding_id,
         "old_status": old_status,
         "new_status": resolution,
         "note": note or None,
-        "type": match.get("type", ""),
-        "file": (match.get("location") or {}).get("path") or match.get("file", ""),
+        "remaining": {
+            "critical": remaining.get("critical", 0),
+            "high": remaining.get("high", 0),
+            "medium": remaining.get("medium", 0),
+            "low": remaining.get("low", 0),
+            "total": total_open,
+        },
+        "new_verdict": new_verdict,
     }, indent=2)
 
 
@@ -639,17 +762,22 @@ def tool_ybe_status(args: dict) -> str:
     history = store.get("history", [])
     prev_score = history[-2]["score"] if len(history) >= 2 else None
 
+    score = store.get("currentScore")
     return json.dumps({
         "scanned": True,
-        "score": store.get("currentScore"),
+        "score": score,
         "previous_score": prev_score,
-        "verdict": store.get("verdict", "UNKNOWN"),
+        "verdict": _score_to_verdict(score),
         "last_scan": store.get("lastScan"),
+        "scan_scope": store.get("scanScope", "full"),
+        "total_findings": len(findings),
         "open": len(open_f),
         "fixed": len(fixed_f),
         "ignored": len(ign_f),
-        "total": len(findings),
-        "open_by_severity": by_sev,
+        "critical": by_sev.get("critical", 0),
+        "high": by_sev.get("high", 0),
+        "medium": by_sev.get("medium", 0),
+        "low": by_sev.get("low", 0),
     }, indent=2)
 
 
