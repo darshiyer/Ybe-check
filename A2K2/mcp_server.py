@@ -494,7 +494,7 @@ def tool_ybe_scan(args: dict) -> str:
         "duration_ms": duration_ms,
         "score": score,
         "verdict": verdict,
-        "findings": {
+        "findings_by_severity": {
             "critical": by_sev.get("critical", 0),
             "high": by_sev.get("high", 0),
             "medium": by_sev.get("medium", 0),
@@ -717,6 +717,7 @@ def tool_ybe_resolve(args: dict) -> str:
         "old_status": old_status,
         "new_status": resolution,
         "note": note or None,
+        "score": store.get("currentScore"),
         "remaining": {
             "critical": remaining.get("critical", 0),
             "high": remaining.get("high", 0),
@@ -724,7 +725,7 @@ def tool_ybe_resolve(args: dict) -> str:
             "low": remaining.get("low", 0),
             "total": total_open,
         },
-        "new_verdict": new_verdict,
+        "verdict": new_verdict,
     }, indent=2)
 
 

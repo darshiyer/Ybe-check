@@ -89,7 +89,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _watchStore(root: string): void {
         const pattern = new vscode.RelativePattern(root, '.ybe-check/store.json');
         this._fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
-        const reload = () => { this._store?.reload(); this._render(); };
+        const reload = () => { this._store?.reload(); this._renderDebounced(350); };
         this._fileWatcher.onDidChange(reload);
         this._fileWatcher.onDidCreate(reload);
         this._context.subscriptions.push(this._fileWatcher);
@@ -201,6 +201,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     // ── Render ───────────────────────────────────────────────────────
+
+    private _renderDebounced(delayMs: number): void {
+        clearTimeout((this as any)._renderTimer);
+        (this as any)._renderTimer = setTimeout(() => this._render(), delayMs);
+    }
 
     private _render(): void {
         if (!this._view) { return; }
@@ -336,12 +341,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _handleSetStatus(findingId: string, status: FindingStatus): void {
         if (!this._store) { return; }
         this._store.setFindingStatus(findingId, status);
-        this._render();
-        this._view?.webview.postMessage({
-            type: 'toast',
-            text: status === 'fixed' ? 'Marked as fixed' : 'Ignored',
-            style: 'ok',
-        });
+        // Re-render is triggered by the file watcher with debounce,
+        // giving the webview's collapse animation time to finish first.
+        if (status === 'open') {
+            // Reopen has no animation on the webview side, so toast here
+            this._view?.webview.postMessage({ type: 'toast', text: 'Reopened', style: 'ok' });
+        }
     }
 
     // ── Export ───────────────────────────────────────────────────────
